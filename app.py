@@ -81,7 +81,8 @@ def platform_sayfasi(platform_adi):
     
     with tab1:
         st.subheader("Satışları Gir")
-        with st.form(f"{platform_adi}_satis_form"):
+        # YENİLİK: clear_on_submit=True eklendi. Kaydedince rakamlar sıfırlanır.
+        with st.form(f"{platform_adi}_satis_form", clear_on_submit=True):
             tarih = st.date_input("Satış Tarihi", datetime.date.today())
             col1, col2 = st.columns(2)
             with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_satis_online")
@@ -94,20 +95,14 @@ def platform_sayfasi(platform_adi):
                         if len(ayar_getir) > 0:
                             ayar = ayar_getir[0]
                             
-                            # --- YENİ KDV'Lİ HESAPLAMA MANTIĞI ---
-                            # 1. Komisyon Brüt (KDV'li) tutar üzerinden kesilir
                             komisyon_tutari = tutar * (float(ayar['komisyon']) / 100)
-                            
-                            # 2. Stopaj KDV Hariç tutar üzerinden hesaplanır (%10 KDV için 1.10'a bölüyoruz)
                             kdv_haric_tutar = tutar / 1.10
                             stopaj_tutari = kdv_haric_tutar * (float(ayar['stopaj']) / 100)
-                            
                             kesinti = komisyon_tutari + stopaj_tutari
                             
-                            # 3. Online ve Kapıda ödeme farkı
                             if o_tip == "Online":
                                 net = tutar - kesinti  
-                            else: # Kapıda Ödeme
+                            else:
                                 net = -kesinti  
                                 
                             tahsilat_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
@@ -121,11 +116,10 @@ def platform_sayfasi(platform_adi):
                         else:
                             st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
                             return
-                st.success("Satışlar KDV Hariç Stopaj kuralına göre başarıyla kaydedildi!")
-                st.info("💡 Not: Stopaj kesintisi, brüt cirodan %10 KDV düşüldükten sonra kalan matrah üzerinden hesaplanmıştır.")
+                st.success("Satışlar başarıyla kaydedildi!")
 
     with tab2:
-        st.subheader("Bankaya Yatması Beklenen Paralar")
+        st.subheader("⏳ Bankaya Yatması Beklenen Paralar")
         bekleyenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Bekliyor"))
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
@@ -153,9 +147,6 @@ def platform_sayfasi(platform_adi):
                 key=f"{platform_adi}_editor"
             )
             
-            dosya, uzanti, mime = excel_indir(df[['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']])
-            st.download_button(label=f"📥 Bekleyenleri Excel'e İndir", data=dosya, file_name=f"{platform_adi}_Bekleyenler.{uzanti}", mime=mime)
-            
             secilenler = edited_df[edited_df["Seç"] == True]
             col1, col2 = st.columns(2)
             with col1: st.write(f"Tüm Bekleyenlerin Toplamı: **{df['net'].sum():,.2f} ₺**")
@@ -171,6 +162,37 @@ def platform_sayfasi(platform_adi):
                     st.warning("Lütfen listeden en az bir tane satış seçin.")
         else:
             st.success("Bekleyen alacağınız bulunmuyor.")
+
+        st.divider()
+
+        st.subheader("✅ Tahsil Edilenler (Geçmiş Ödemeler)")
+        odenenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Ödendi"))
+        
+        if odenenler:
+            df_odenen = pd.DataFrame(odenenler)
+            if 'komisyon_tutari' not in df_odenen.columns: df_odenen['komisyon_tutari'] = 0.0
+            if 'stopaj_tutari' not in df_odenen.columns: df_odenen['stopaj_tutari'] = 0.0
+            
+            df_odenen = df_odenen.sort_values(by="tarih", ascending=False)
+
+            st.dataframe(
+                df_odenen[['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']],
+                column_config={
+                    "tarih": "Satış Tarihi",
+                    "odeme_tipi": "Ödeme Tipi",
+                    "brut": st.column_config.NumberColumn("Brüt", format="%.2f ₺"),
+                    "komisyon_tutari": st.column_config.NumberColumn("Komisyon", format="%.2f ₺"),
+                    "stopaj_tutari": st.column_config.NumberColumn("Stopaj", format="%.2f ₺"),
+                    "net": st.column_config.NumberColumn("Net Yatan", format="%.2f ₺"),
+                    "tahsilat_tarihi": "Yattığı Tarih"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            st.info(f"💰 **Bugüne Kadar Tahsil Edilen Toplam Tutar:** {df_odenen['net'].sum():,.2f} ₺")
+        else:
+            st.info("Henüz tahsil edilmiş (Ödendi olarak işaretlenmiş) bir kayıt bulunmuyor.")
+
 
     with tab3:
         st.subheader("Komisyon ve Kesinti Oranlarını Öğret")
@@ -205,7 +227,9 @@ def platform_sayfasi(platform_adi):
 # --- MENÜ YÖNLENDİRMELERİ ---
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
-    with st.form("ciro_form"):
+    
+    # YENİLİK: clear_on_submit eklendi
+    with st.form("ciro_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
             tarih = st.date_input("Tarih", datetime.date.today())
@@ -221,16 +245,42 @@ if menu == "Günlük Dükkan Cirosu":
             veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
             if db_yaz(supabase.table("ciro").insert(veri)):
                 st.success("Dükkan Cirosu Kaydedildi!")
+                st.rerun()
 
-elif menu == "Yemek Sepeti Yönetimi":
-    platform_sayfasi("Yemek Sepeti")
-
-elif menu == "Trendyol Yönetimi":
-    platform_sayfasi("Trendyol")
+    st.divider()
+    
+    st.subheader("📋 Geçmiş Ciro Kayıtları")
+    cirolar = db_oku(supabase.table("ciro").select("*"))
+    
+    if cirolar:
+        df_ciro = pd.DataFrame(cirolar)
+        df_ciro = df_ciro.sort_values(by="tarih", ascending=False)
+        
+        st.dataframe(
+            df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']],
+            column_config={
+                "tarih": "Tarih",
+                "kasa": "Kasa",
+                "nakit": st.column_config.NumberColumn("Nakit", format="%.2f ₺"),
+                "kredi_karti": st.column_config.NumberColumn("Kredi Kartı", format="%.2f ₺"),
+                "pavo_nakit": st.column_config.NumberColumn("Pavo Nakit", format="%.2f ₺"),
+                "pavo_kredi": st.column_config.NumberColumn("Pavo Kredi", format="%.2f ₺"),
+                "odenmez": st.column_config.NumberColumn("Ödenmez", format="%.2f ₺"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        dosya, uzanti, mime = excel_indir(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']])
+        st.download_button(label="📥 Ciro Kayıtlarını Excel'e İndir", data=dosya, file_name=f"Gunluk_Ciro_Gecmisi.{uzanti}", mime=mime)
+    else:
+        st.info("Sistemde henüz kaydedilmiş bir ciro bulunmuyor.")
 
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
-    with st.form("masraf_form"):
+    
+    # YENİLİK: clear_on_submit eklendi
+    with st.form("masraf_form", clear_on_submit=True):
         tarih = st.date_input("Tarih", datetime.date.today())
         aciklama = st.text_input("Açıklama")
         tutar = st.number_input("Tutar (₺)", min_value=0.0)
@@ -251,7 +301,7 @@ elif menu == "Kasa Yönetimi (Virman)":
     secilen = st.date_input("İşlem Tarihi", datetime.date.today())
     
     st.subheader("Güne Başlangıç")
-    with st.form("acilis_form"):
+    with st.form("acilis_form", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1: k1_acilis = st.number_input("Kasa 1 Açılış (₺)", min_value=0.0)
         with c2: k2_acilis = st.number_input("Kasa 2 Açılış (₺)", min_value=0.0)
@@ -266,7 +316,7 @@ elif menu == "Kasa Yönetimi (Virman)":
                     st.success("Açılışlar Kaydedildi!")
 
     st.subheader("Kasalar Arası Virman")
-    with st.form("virman_form"):
+    with st.form("virman_form", clear_on_submit=True):
         c1, c2, c3, c4 = st.columns(4)
         with c1: gonderen = st.selectbox("Gönderen", ["Kasa 1", "Kasa 2"])
         with c2: alan = st.selectbox("Alan", ["Kasa 2", "Kasa 1"])
@@ -315,6 +365,8 @@ elif menu == "Raporlar":
         df_sat = pd.DataFrame(sat)
         if 'komisyon_tutari' not in df_sat.columns: df_sat['komisyon_tutari'] = 0.0
         if 'stopaj_tutari' not in df_sat.columns: df_sat['stopaj_tutari'] = 0.0
+        
+        df_sat = df_sat.sort_values(by="tarih", ascending=False)
         st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'durum']])
         dosya, uzanti, mime = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
         st.download_button(label="📥 Platform Satışlarını Excel'e İndir", data=dosya, file_name=f"Platform_Satislar_Raporu.{uzanti}", mime=mime)
@@ -325,6 +377,7 @@ elif menu == "Raporlar":
     cir = db_oku(supabase.table("ciro").select("*"))
     if cir: 
         df_cir = pd.DataFrame(cir)
+        df_cir = df_cir.sort_values(by="tarih", ascending=False)
         st.dataframe(df_cir)
         dosya2, uzanti2, mime2 = excel_indir(df_cir)
         st.download_button(label="📥 Dükkan Cirosunu Excel'e İndir", data=dosya2, file_name=f"Dukkan_Cirosu_Raporu.{uzanti2}", mime=mime2)
