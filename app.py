@@ -67,7 +67,7 @@ menu = st.sidebar.radio("Menü", [
     "Trendyol Yönetimi", 
     "Masraf Girişi", 
     "Kasa Yönetimi (Virman)",
-    "Personel & Puantaj", # YENİ EKLENDİ
+    "Personel & Puantaj",
     "Raporlar"
 ])
 
@@ -274,6 +274,13 @@ if menu == "Günlük Dükkan Cirosu":
     else:
         st.info("Sistemde henüz kaydedilmiş bir ciro bulunmuyor.")
 
+# İŞTE BURAYI UNUTMUŞTUM! YEMEK SEPETİ VE TRENDYOL YÖNLENDİRMELERİ EKLENDİ 🚀
+elif menu == "Yemek Sepeti Yönetimi":
+    platform_sayfasi("Yemek Sepeti")
+
+elif menu == "Trendyol Yönetimi":
+    platform_sayfasi("Trendyol")
+
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
     
@@ -296,7 +303,7 @@ elif menu == "Masraf Girişi":
 
     st.divider()
     
-    # --- YENİ: MASRAF DÜZENLE / SİL BÖLÜMÜ ---
+    # --- MASRAF DÜZENLE / SİL BÖLÜMÜ ---
     with st.expander("✏️ Masraf Düzenle veya Sil", expanded=False):
         st.info("Aşağıdan geçmiş bir masrafı seçip silebilir veya bilgilerini güncelleyebilirsiniz.")
         tum_masraflar = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
@@ -392,10 +399,8 @@ elif menu == "Masraf Girişi":
             use_container_width=True
         )
         
-        # Filtre sonucuna göre toplam tutar
         st.info(f"📊 Tablodaki Masrafların Toplamı: **{df_masraf['tutar'].sum():,.2f} ₺**")
         
-        # Excel İndirme Butonu
         dosya_masraf, uzanti_m, mime_m = excel_indir(df_masraf[['tarih', 'aciklama', 'tutar', 'odeme_tipi']])
         st.download_button(
             label="📥 Ekranda Görünen Masrafları Excel'e İndir", 
@@ -466,7 +471,7 @@ elif menu == "Kasa Yönetimi (Virman)":
         st.write(f"Açılış: {k2_a:,.2f} ₺\n\nNakit Giriş: + {k2_g:,.2f} ₺\n\nNakit Çıkış: - {k2_c:,.2f} ₺\n\nVirman Dengesi: {(k2_vg - k2_vgi):,.2f} ₺")
         st.metric("KASA 2'DE OLMASI GEREKEN", f"{k2_net:,.2f} ₺")
 
-# --- YENİ EKLENEN: PERSONEL & PUANTAJ MENÜSÜ ---
+# --- PERSONEL & PUANTAJ MENÜSÜ ---
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel & Puantaj Yönetimi")
     
@@ -524,7 +529,6 @@ elif menu == "Personel & Puantaj":
         if puantajlar:
             df_puantaj = pd.DataFrame(puantajlar)
             
-            # Filtreleme
             with st.expander("🔍 Kayıtları Filtrele", expanded=False):
                 aranan_isim = st.text_input("Personel İsmi Ara")
             if aranan_isim:
