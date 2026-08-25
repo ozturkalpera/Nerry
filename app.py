@@ -93,15 +93,22 @@ def platform_sayfasi(platform_adi):
                         ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", o_tip))
                         if len(ayar_getir) > 0:
                             ayar = ayar_getir[0]
+                            
+                            # --- YENİ KDV'Lİ HESAPLAMA MANTIĞI ---
+                            # 1. Komisyon Brüt (KDV'li) tutar üzerinden kesilir
                             komisyon_tutari = tutar * (float(ayar['komisyon']) / 100)
-                            stopaj_tutari = tutar * (float(ayar['stopaj']) / 100)
+                            
+                            # 2. Stopaj KDV Hariç tutar üzerinden hesaplanır (%10 KDV için 1.10'a bölüyoruz)
+                            kdv_haric_tutar = tutar / 1.10
+                            stopaj_tutari = kdv_haric_tutar * (float(ayar['stopaj']) / 100)
+                            
                             kesinti = komisyon_tutari + stopaj_tutari
                             
-                            # YENİ MUHASEBE MANTIĞI:
+                            # 3. Online ve Kapıda ödeme farkı
                             if o_tip == "Online":
-                                net = tutar - kesinti  # Normal alacak
+                                net = tutar - kesinti  
                             else: # Kapıda Ödeme
-                                net = -kesinti  # Tutar zaten kasaya girdi, sadece komisyonu içerideki hakedişten düşüyoruz
+                                net = -kesinti  
                                 
                             tahsilat_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
                             
@@ -114,8 +121,8 @@ def platform_sayfasi(platform_adi):
                         else:
                             st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
                             return
-                st.success("Satışlar başarıyla kaydedildi!")
-                st.info("💡 Not: Kapıda ödemelerin brüt tutarı fiziksel kasaya girdiği varsayıldığı için tahsilat tablosunda sadece 'eksi (-) komisyon gideri' olarak yansıtılmıştır.")
+                st.success("Satışlar KDV Hariç Stopaj kuralına göre başarıyla kaydedildi!")
+                st.info("💡 Not: Stopaj kesintisi, brüt cirodan %10 KDV düşüldükten sonra kalan matrah üzerinden hesaplanmıştır.")
 
     with tab2:
         st.subheader("Bankaya Yatması Beklenen Paralar")
