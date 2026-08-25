@@ -81,13 +81,21 @@ def platform_sayfasi(platform_adi):
     
     with tab1:
         st.subheader("Satışları Gir")
+        
+        # --- EKRAN BOZMAYAN GÜVENLİ TEMİZLEME YÖNTEMİ ---
+        reset_key = f"{platform_adi}_reset"
+        if reset_key not in st.session_state:
+            st.session_state[reset_key] = 0
+            
         with st.form(f"{platform_adi}_satis_form"):
             tarih = st.date_input("Satış Tarihi", datetime.date.today())
             col1, col2 = st.columns(2)
-            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_satis_online")
-            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_satis_kapida")
+            # Kutuların sonuna gizli kimlik ekliyoruz, kaydedince bu kimlik değişip kutuyu sıfırlıyor
+            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"on_{st.session_state[reset_key]}")
+            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0, key=f"kap_{st.session_state[reset_key]}")
             
             if st.form_submit_button("Satışları Kaydet"):
+                islem_basarili = False
                 for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
                     if tutar > 0:
                         ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", o_tip))
@@ -105,17 +113,20 @@ def platform_sayfasi(platform_adi):
                                 net = -kesinti  
                                 
                             tahsilat_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
-                            
                             veri = {
                                 "tarih": str(tarih), "platform": platform_adi, "odeme_tipi": o_tip, 
                                 "brut": tutar, "komisyon_tutari": komisyon_tutari, "stopaj_tutari": stopaj_tutari, 
                                 "kesinti": kesinti, "net": net, "tahsilat_tarihi": str(tahsilat_tarihi), "durum": "Bekliyor"
                             }
                             db_yaz(supabase.table("platform_satis").insert(veri))
+                            islem_basarili = True
                         else:
                             st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
-                            return
-                st.success("Satışlar başarıyla kaydedildi!")
+                            
+                if islem_basarili:
+                    st.session_state[reset_key] += 1 # Kutuları sıfırlatır
+                    st.success("Satışlar başarıyla kaydedildi!")
+                    st.rerun()
 
     with tab2:
         st.subheader("⏳ Bankaya Yatması Beklenen Paralar")
@@ -192,7 +203,6 @@ def platform_sayfasi(platform_adi):
         else:
             st.info("Henüz tahsil edilmiş (Ödendi olarak işaretlenmiş) bir kayıt bulunmuyor.")
 
-
     with tab3:
         st.subheader("Komisyon ve Kesinti Oranlarını Öğret")
         ayarlar = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi))
@@ -227,34 +237,33 @@ def platform_sayfasi(platform_adi):
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     
-    # --- YUKARISI: FORM ---
+    if "ciro_reset" not in st.session_state: st.session_state["ciro_reset"] = 0
     with st.form("ciro_form"):
         c1, c2 = st.columns(2)
         with c1:
             tarih = st.date_input("Tarih", datetime.date.today())
             kasa = st.selectbox("Hedef Kasa", ["Kasa 1", "Kasa 2"])
-            nakit = st.number_input("Nakit (₺)", min_value=0.0)
-            kredi = st.number_input("Kredi Kartı (₺)", min_value=0.0)
+            nakit = st.number_input("Nakit (₺)", min_value=0.0, key=f"c_n_{st.session_state['ciro_reset']}")
+            kredi = st.number_input("Kredi Kartı (₺)", min_value=0.0, key=f"c_k_{st.session_state['ciro_reset']}")
         with c2:
-            pavo_n = st.number_input("Pavo Nakit (₺)", min_value=0.0)
-            pavo_k = st.number_input("Pavo Kredi (₺)", min_value=0.0)
-            odenmez = st.number_input("Ödenmez (₺)", min_value=0.0)
+            pavo_n = st.number_input("Pavo Nakit (₺)", min_value=0.0, key=f"c_pn_{st.session_state['ciro_reset']}")
+            pavo_k = st.number_input("Pavo Kredi (₺)", min_value=0.0, key=f"c_pk_{st.session_state['ciro_reset']}")
+            odenmez = st.number_input("Ödenmez (₺)", min_value=0.0, key=f"c_o_{st.session_state['ciro_reset']}")
         
         if st.form_submit_button("Ciro Kaydet"):
             veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
             if db_yaz(supabase.table("ciro").insert(veri)):
+                st.session_state["ciro_reset"] += 1
                 st.success("Dükkan Cirosu Kaydedildi!")
-                st.rerun() # Girdiği an alttaki tabloyu yenilemesi için
+                st.rerun()
 
     st.divider()
     
-    # --- AŞAĞISI: GEÇMİŞ CİROLAR TABLOSU ---
     st.subheader("📋 Geçmiş Ciro Kayıtları")
     cirolar = db_oku(supabase.table("ciro").select("*"))
     
     if cirolar:
         df_ciro = pd.DataFrame(cirolar)
-        # En yeni tarih en üstte çıksın diye sıralıyoruz
         df_ciro = df_ciro.sort_values(by="tarih", ascending=False)
         
         st.dataframe(
@@ -272,24 +281,19 @@ if menu == "Günlük Dükkan Cirosu":
             use_container_width=True
         )
         
-        # Excel Butonu
         dosya, uzanti, mime = excel_indir(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']])
         st.download_button(label="📥 Ciro Kayıtlarını Excel'e İndir", data=dosya, file_name=f"Gunluk_Ciro_Gecmisi.{uzanti}", mime=mime)
     else:
         st.info("Sistemde henüz kaydedilmiş bir ciro bulunmuyor.")
 
-elif menu == "Yemek Sepeti Yönetimi":
-    platform_sayfasi("Yemek Sepeti")
-
-elif menu == "Trendyol Yönetimi":
-    platform_sayfasi("Trendyol")
-
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
+    
+    if "masraf_reset" not in st.session_state: st.session_state["masraf_reset"] = 0
     with st.form("masraf_form"):
         tarih = st.date_input("Tarih", datetime.date.today())
-        aciklama = st.text_input("Açıklama")
-        tutar = st.number_input("Tutar (₺)", min_value=0.0)
+        aciklama = st.text_input("Açıklama", key=f"m_a_{st.session_state['masraf_reset']}")
+        tutar = st.number_input("Tutar (₺)", min_value=0.0, key=f"m_t_{st.session_state['masraf_reset']}")
         odeme_y = st.selectbox("Nereden Ödendi?", [
             "Nakit - Kasa 1", 
             "Nakit - Kasa 2", 
@@ -300,7 +304,9 @@ elif menu == "Masraf Girişi":
         if st.form_submit_button("Masrafı Kaydet"):
             veri = {"tarih": str(tarih), "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme_y}
             if db_yaz(supabase.table("masraf").insert(veri)):
+                st.session_state["masraf_reset"] += 1
                 st.success("Masraf Kaydedildi!")
+                st.rerun()
 
 elif menu == "Kasa Yönetimi (Virman)":
     st.header("Kasa Yönetimi ve Virman")
@@ -322,17 +328,20 @@ elif menu == "Kasa Yönetimi (Virman)":
                     st.success("Açılışlar Kaydedildi!")
 
     st.subheader("Kasalar Arası Virman")
+    if "virman_reset" not in st.session_state: st.session_state["virman_reset"] = 0
     with st.form("virman_form"):
         c1, c2, c3, c4 = st.columns(4)
         with c1: gonderen = st.selectbox("Gönderen", ["Kasa 1", "Kasa 2"])
         with c2: alan = st.selectbox("Alan", ["Kasa 2", "Kasa 1"])
-        with c3: tutar_v = st.number_input("Tutar (₺)", min_value=0.0)
+        with c3: tutar_v = st.number_input("Tutar (₺)", min_value=0.0, key=f"v_t_{st.session_state['virman_reset']}")
         with c4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Virman Yap"):
                 if gonderen != alan and tutar_v > 0:
                     if db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Virman", "gonderen": gonderen, "alan": alan, "tutar": tutar_v})):
+                        st.session_state["virman_reset"] += 1
                         st.success("Transfer Kaydedildi!")
+                        st.rerun()
 
     st.divider()
     st.subheader("📊 Günün Kasa Özetleri")
@@ -371,6 +380,8 @@ elif menu == "Raporlar":
         df_sat = pd.DataFrame(sat)
         if 'komisyon_tutari' not in df_sat.columns: df_sat['komisyon_tutari'] = 0.0
         if 'stopaj_tutari' not in df_sat.columns: df_sat['stopaj_tutari'] = 0.0
+        
+        df_sat = df_sat.sort_values(by="tarih", ascending=False)
         st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'durum']])
         dosya, uzanti, mime = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
         st.download_button(label="📥 Platform Satışlarını Excel'e İndir", data=dosya, file_name=f"Platform_Satislar_Raporu.{uzanti}", mime=mime)
@@ -381,6 +392,7 @@ elif menu == "Raporlar":
     cir = db_oku(supabase.table("ciro").select("*"))
     if cir: 
         df_cir = pd.DataFrame(cir)
+        df_cir = df_cir.sort_values(by="tarih", ascending=False)
         st.dataframe(df_cir)
         dosya2, uzanti2, mime2 = excel_indir(df_cir)
         st.download_button(label="📥 Dükkan Cirosunu Excel'e İndir", data=dosya2, file_name=f"Dukkan_Cirosu_Raporu.{uzanti2}", mime=mime2)
