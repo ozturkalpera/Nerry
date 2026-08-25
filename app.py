@@ -27,24 +27,19 @@ def db_yaz(sorgu):
         st.error(f"⚠️ İşlem Başarısız Oldu. Hata Detayı: {e}")
         return False
 
-# --- GİRİŞ EKRANI (GÜNCELLENDİ) ---
+# --- GİRİŞ EKRANI ---
 if 'giris_yapildi' not in st.session_state:
     st.session_state.giris_yapildi = False
 
 if not st.session_state.giris_yapildi:
     st.title("☕ Cafe Yönetim Sistemi - Giriş")
-    
-    # Enter tuşuyla çalışması için form içine alındı
     with st.form("login_form"):
         kullanici = st.text_input("Kullanıcı Adı")
         sifre = st.text_input("Şifre", type="password")
         submit_btn = st.form_submit_button("Giriş Yap")
-        
         if submit_btn:
-            # Boşlukları sil ve otomatik küçük harfe çevir (Klavye hatalarını önler)
             k = kullanici.strip().lower()
             s = sifre.strip()
-            
             if (k == "admin" and s == "admin123") or (k == "user" and s == "user123"):
                 st.session_state.giris_yapildi = True
                 st.session_state.rol = "admin" if k == "admin" else "user"
@@ -87,11 +82,19 @@ def platform_sayfasi(platform_adi):
                         ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", o_tip))
                         if len(ayar_getir) > 0:
                             ayar = ayar_getir[0]
-                            kesinti = tutar * ((float(ayar['komisyon']) + float(ayar['stopaj'])) / 100)
+                            # AYRI AYRI HESAPLAMA
+                            komisyon_tutari = tutar * (float(ayar['komisyon']) / 100)
+                            stopaj_tutari = tutar * (float(ayar['stopaj']) / 100)
+                            kesinti = komisyon_tutari + stopaj_tutari
                             net = tutar - kesinti
+                            
                             tahsilat_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
                             
-                            veri = {"tarih": str(tarih), "platform": platform_adi, "odeme_tipi": o_tip, "brut": tutar, "kesinti": kesinti, "net": net, "tahsilat_tarihi": str(tahsilat_tarihi), "durum": "Bekliyor"}
+                            veri = {
+                                "tarih": str(tarih), "platform": platform_adi, "odeme_tipi": o_tip, 
+                                "brut": tutar, "komisyon_tutari": komisyon_tutari, "stopaj_tutari": stopaj_tutari, 
+                                "kesinti": kesinti, "net": net, "tahsilat_tarihi": str(tahsilat_tarihi), "durum": "Bekliyor"
+                            }
                             db_yaz(supabase.table("platform_satis").insert(veri))
                         else:
                             st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
@@ -104,20 +107,28 @@ def platform_sayfasi(platform_adi):
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
             
-            df.insert(0, "Seç", False)
-            st.info("💡 **İpucu:** Hesabınıza yatan ödemeleri soldaki kutucuklardan işaretleyin. Seçtiklerinizin toplamı aşağıda otomatik hesaplanacaktır.")
+            # Eski kayıtlarda hata vermemesi için güvenlik önlemi
+            if 'komisyon_tutari' not in df.columns: df['komisyon_tutari'] = 0.0
+            if 'stopaj_tutari' not in df.columns: df['stopaj_tutari'] = 0.0
             
+            df.insert(0, "Seç", False)
+            st.info("💡 **İpucu:** Hesabınıza yatan ödemeleri işaretleyip tek tuşla 'Ödendi' yapabilirsiniz.")
+            
+            # YENİ VE DETAYLI LİSTE GÖRÜNÜMÜ
             edited_df = st.data_editor(
-                df[['Seç', 'id', 'tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi']],
+                df[['Seç', 'id', 'tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']],
                 column_config={
                     "Seç": st.column_config.CheckboxColumn("Tik (Seç)", default=False),
                     "id": None, 
                     "tarih": "Satış Tarihi",
                     "odeme_tipi": "Ödeme Tipi",
-                    "net": st.column_config.NumberColumn("Net Tutar (₺)", format="%.2f ₺"),
-                    "tahsilat_tarihi": "Beklenen Ödeme Tarihi"
+                    "brut": st.column_config.NumberColumn("Brüt Ciro", format="%.2f ₺"),
+                    "komisyon_tutari": st.column_config.NumberColumn("Komisyon", format="%.2f ₺"),
+                    "stopaj_tutari": st.column_config.NumberColumn("Stopaj", format="%.2f ₺"),
+                    "net": st.column_config.NumberColumn("Net Yatan", format="%.2f ₺"),
+                    "tahsilat_tarihi": "Yatacağı Tarih"
                 },
-                disabled=['tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi'],
+                disabled=['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi'],
                 hide_index=True,
                 use_container_width=True,
                 key=f"{platform_adi}_editor"
@@ -275,7 +286,11 @@ elif menu == "Raporlar":
     st.header("Sistem Raporları")
     st.subheader("Platform Satışları (Tümü)")
     sat = db_oku(supabase.table("platform_satis").select("*"))
-    if sat: st.dataframe(pd.DataFrame(sat)[['tarih', 'platform', 'odeme_tipi', 'brut', 'net', 'durum']])
+    if sat: 
+        df_sat = pd.DataFrame(sat)
+        if 'komisyon_tutari' not in df_sat.columns: df_sat['komisyon_tutari'] = 0.0
+        if 'stopaj_tutari' not in df_sat.columns: df_sat['stopaj_tutari'] = 0.0
+        st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'durum']])
     
     st.subheader("Dükkan Cirosu")
     cir = db_oku(supabase.table("ciro").select("*"))
