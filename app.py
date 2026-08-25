@@ -257,11 +257,44 @@ def platform_sayfasi(platform_adi):
             if 'komisyon_tutari' not in df.columns: df['komisyon_tutari'] = 0.0
             if 'stopaj_tutari' not in df.columns: df['stopaj_tutari'] = 0.0
             df.insert(0, "Seç", False)
-            edited_df = st.data_editor(df[['Seç', 'id', 'tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']], hide_index=True, use_container_width=True, disabled=['id','tarih','odeme_tipi','brut','komisyon_tutari','stopaj_tutari','net','tahsilat_tarihi'])
+            
+            # BURASI GERİ GELDİ: Anlık hesaplama için sütun ayarları
+            edited_df = st.data_editor(
+                df[['Seç', 'id', 'tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']],
+                column_config={
+                    "Seç": st.column_config.CheckboxColumn("Tik (Seç)", default=False),
+                    "id": None, 
+                    "tarih": "Satış Tarihi",
+                    "odeme_tipi": "Ödeme Tipi",
+                    "brut": st.column_config.NumberColumn("Brüt", format="%.2f ₺"),
+                    "komisyon_tutari": st.column_config.NumberColumn("Komisyon", format="%.2f ₺"),
+                    "stopaj_tutari": st.column_config.NumberColumn("Stopaj", format="%.2f ₺"),
+                    "net": st.column_config.NumberColumn("Net Yatan", format="%.2f ₺"),
+                    "tahsilat_tarihi": "Yatacağı Tarih"
+                },
+                disabled=['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi'],
+                hide_index=True,
+                use_container_width=True,
+                key=f"{platform_adi}_editor"
+            )
+            
             secilenler = edited_df[edited_df["Seç"] == True]
+            
+            # BURASI GERİ GELDİ: Seçilenlerin Toplamı
+            col1, col2 = st.columns(2)
+            with col1: st.write(f"Tüm Bekleyenlerin Toplamı: **{df['net'].sum():,.2f} ₺**")
+            with col2: st.success(f"✔️ Seçtiklerinin Toplamı: **{secilenler['net'].sum():,.2f} ₺**")
+            
             if st.button("✅ Seçili Olanları 'ÖDENDİ' İşaretle"):
-                for idx in secilenler["id"]: db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
-                st.rerun()
+                if not secilenler.empty:
+                    for idx in secilenler["id"]: 
+                        db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
+                    st.success("İşaretlendi!")
+                    st.rerun()
+                else:
+                    st.warning("Lütfen listeden en az bir tane satış seçin.")
+        else:
+            st.success("Bekleyen alacağınız bulunmuyor.")
 
         odenenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Ödendi"))
         if odenenler:
@@ -599,31 +632,23 @@ elif menu == "Kasa Yönetimi (Virman)":
 
     st.divider()
     
-    # --- YENİ: VİRMAN VE EKSİK/FAZLA DÜZENLEME BÖLÜMÜ ---
     with st.expander("✏️ Virman ve Kasa Farkı Düzenle veya Sil", expanded=False):
-        st.info("Aşağıdan geçmiş bir virman veya sayım farkı kaydını seçip güncelleyebilir veya silebilirsiniz.")
         gecmis_islemler = db_oku(supabase.table("kasa_islemleri").select("*").in_("islem_tipi", ["Virman", "Eksik", "Fazla"]).order("tarih", desc=True))
-        
         if gecmis_islemler:
             secenekler_k = {}
             for i in gecmis_islemler:
-                if i['islem_tipi'] == 'Virman':
-                    lbl = f"{i['tarih']} | VİRMAN | {i['gonderen']} -> {i['alan']} | {i['tutar']} ₺"
-                elif i['islem_tipi'] == 'Eksik':
-                    lbl = f"{i['tarih']} | EKSİK ÇIKTI | {i['gonderen']} | {i['tutar']} ₺"
-                elif i['islem_tipi'] == 'Fazla':
-                    lbl = f"{i['tarih']} | FAZLA ÇIKTI | {i['alan']} | {i['tutar']} ₺"
+                if i['islem_tipi'] == 'Virman': lbl = f"{i['tarih']} | VİRMAN | {i['gonderen']} -> {i['alan']} | {i['tutar']} ₺"
+                elif i['islem_tipi'] == 'Eksik': lbl = f"{i['tarih']} | EKSİK ÇIKTI | {i['gonderen']} | {i['tutar']} ₺"
+                elif i['islem_tipi'] == 'Fazla': lbl = f"{i['tarih']} | FAZLA ÇIKTI | {i['alan']} | {i['tutar']} ₺"
                 secenekler_k[lbl] = i
                 
             sec_k_str = st.selectbox("İşlem Seçin", ["Lütfen seçin..."] + list(secenekler_k.keys()))
-            
             if sec_k_str != "Lütfen seçin...":
                 sec_k = secenekler_k[sec_k_str]
                 with st.form("kasa_duzenle_form"):
                     try: k_tar = datetime.datetime.strptime(sec_k['tarih'], '%Y-%m-%d').date()
                     except: k_tar = datetime.date.today()
                     y_tarih = st.date_input("Tarih", value=k_tar)
-                    
                     islem_turleri = ["Virman", "Eksik", "Fazla"]
                     y_islem = st.selectbox("İşlem Tipi", islem_turleri, index=islem_turleri.index(sec_k['islem_tipi']))
                     
@@ -631,36 +656,29 @@ elif menu == "Kasa Yönetimi (Virman)":
                     c_k1, c_k2 = st.columns(2)
                     with c_k1:
                         idx_g = k_list.index(sec_k['gonderen']) if sec_k.get('gonderen') in k_list else 0
-                        y_gon = st.selectbox("Gönderen Kasa (Veya Eksik Kasa)", k_list, index=idx_g)
+                        y_gon = st.selectbox("Gönderen (Veya Eksik) Kasa", k_list, index=idx_g)
                     with c_k2:
                         idx_a = k_list.index(sec_k['alan']) if sec_k.get('alan') in k_list else 0
-                        y_aln = st.selectbox("Alan Kasa (Veya Fazla Kasa)", k_list, index=idx_a)
+                        y_aln = st.selectbox("Alan (Veya Fazla) Kasa", k_list, index=idx_a)
                         
                     y_tutar = st.number_input("Tutar (₺)", min_value=0.0, value=float(sec_k['tutar']))
                     
                     c_gun, c_sil = st.columns(2)
                     with c_gun:
                         if st.form_submit_button("Güncelle"):
-                            if y_islem == "Virman":
-                                veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": y_gon, "alan": y_aln, "tutar": y_tutar}
-                            elif y_islem == "Eksik":
-                                veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": y_gon, "alan": None, "tutar": y_tutar}
-                            elif y_islem == "Fazla":
-                                veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": None, "alan": y_aln, "tutar": y_tutar}
-                                
+                            if y_islem == "Virman": veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": y_gon, "alan": y_aln, "tutar": y_tutar}
+                            elif y_islem == "Eksik": veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": y_gon, "alan": None, "tutar": y_tutar}
+                            elif y_islem == "Fazla": veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": None, "alan": y_aln, "tutar": y_tutar}
                             if db_yaz(supabase.table("kasa_islemleri").update(veri).eq("id", sec_k['id'])):
-                                st.success("İşlem başarıyla güncellendi!")
+                                st.success("İşlem güncellendi!")
                                 st.rerun()
                     with c_sil:
-                        if st.form_submit_button("🗑️ Sil"):
+                        if st.form_submit_button("Sil"):
                             if db_yaz(supabase.table("kasa_islemleri").delete().eq("id", sec_k['id'])):
-                                st.warning("İşlem tamamen silindi!")
+                                st.warning("İşlem silindi!")
                                 st.rerun()
-        else:
-            st.info("Sistemde kayıtlı geçmiş virman veya sayım farkı bulunmuyor.")
 
     st.divider()
-
     st.subheader("📊 Günün Kasa Özetleri")
     
     cirolar = db_oku(supabase.table("ciro").select("*").eq("tarih", str(secilen)))
@@ -681,19 +699,19 @@ elif menu == "Kasa Yönetimi (Virman)":
     k1_a, k1_g, k1_c, k1_vg, k1_vgi, k1_e, k1_f, k1_net = hesapla("Kasa 1")
     k2_a, k2_g, k2_c, k2_vg, k2_vgi, k2_e, k2_f, k2_net = hesapla("Kasa 2")
 
-    c1, c2 = st.columns(2)
-    with c1:
+    col1, col2 = st.columns(2)
+    with col1:
         st.info("### KASA 1 DURUMU")
         st.write(f"Açılış: {k1_a:,.2f} ₺\n\nNakit Giriş: + {k1_g:,.2f} ₺\n\nKasa Fazlası: + {k1_f:,.2f} ₺\n\nNakit Çıkış (Masraf): - {k1_c:,.2f} ₺\n\nKasa Eksiği: - {k1_e:,.2f} ₺\n\nVirman Dengesi: {(k1_vg - k1_vgi):,.2f} ₺")
         st.metric("KASA 1'DE OLMASI GEREKEN", f"{k1_net:,.2f} ₺")
-    with c2:
+    with col2:
         st.success("### KASA 2 DURUMU")
         st.write(f"Açılış: {k2_a:,.2f} ₺\n\nNakit Giriş: + {k2_g:,.2f} ₺\n\nKasa Fazlası: + {k2_f:,.2f} ₺\n\nNakit Çıkış (Masraf): - {k2_c:,.2f} ₺\n\nKasa Eksiği: - {k2_e:,.2f} ₺\n\nVirman Dengesi: {(k2_vg - k2_vgi):,.2f} ₺")
         st.metric("KASA 2'DE OLMASI GEREKEN", f"{k2_net:,.2f} ₺")
 
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel & Puantaj Yönetimi")
-    tab1, tab2, tab3 = st.tabs(["📝 Puantaj (Mesai) Girişi", "📋 Geçmiş Kayıtlar", "⚙️ Personel Yönetimi"])
+    tab1, tab2, tab3 = st.tabs(["📝 Puantaj Girişi", "📋 Geçmiş Kayıtlar", "⚙️ Personel Yönetimi"])
     
     with tab3:
         with st.form("personel_ekle_form"):
@@ -773,7 +791,6 @@ elif menu == "Personel & Puantaj":
 
 elif menu == "Raporlar":
     st.header("Sistem Raporları")
-    # Raporlar aynı şekilde korundu.
     st.subheader("Platform Satışları (Tümü)")
     sat = db_oku(supabase.table("platform_satis").select("*"))
     if sat: 
