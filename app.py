@@ -276,6 +276,7 @@ if menu == "Günlük Dükkan Cirosu":
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
     
+    # --- MASRAF KAYDETME BÖLÜMÜ ---
     with st.form("masraf_form"):
         tarih = st.date_input("Tarih", datetime.date.today())
         aciklama = st.text_input("Açıklama")
@@ -293,8 +294,54 @@ elif menu == "Masraf Girişi":
                 st.success("Masraf Kaydedildi!")
 
     st.divider()
+    
+    # --- YENİ: MASRAF DÜZENLE / SİL BÖLÜMÜ ---
+    with st.expander("✏️ Masraf Düzenle veya Sil", expanded=False):
+        st.info("Aşağıdan geçmiş bir masrafı seçip silebilir veya bilgilerini güncelleyebilirsiniz.")
+        tum_masraflar = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
+        
+        if tum_masraflar:
+            secenekler = {f"{m['tarih']} | {m['aciklama']} | {m['tutar']} ₺": m for m in tum_masraflar}
+            secilen_masraf_str = st.selectbox("İşlem Yapılacak Masrafı Seçin", ["Lütfen bir masraf seçin..."] + list(secenekler.keys()))
+            
+            if secilen_masraf_str != "Lütfen bir masraf seçin...":
+                secilen_m = secenekler[secilen_masraf_str]
+                
+                with st.form("masraf_duzenle_form"):
+                    try:
+                        m_tarih = datetime.datetime.strptime(secilen_m['tarih'], '%Y-%m-%d').date()
+                    except:
+                        m_tarih = datetime.date.today()
+                        
+                    y_tarih = st.date_input("Tarih", value=m_tarih, key="duzenle_tarih")
+                    y_aciklama = st.text_input("Açıklama", value=secilen_m['aciklama'], key="duzenle_aciklama")
+                    y_tutar = st.number_input("Tutar (₺)", min_value=0.0, value=float(secilen_m['tutar']), key="duzenle_tutar")
+                    
+                    odeme_y_liste = ["Nakit - Kasa 1", "Nakit - Kasa 2", "Halkbank Kk", "İşbank Kk", "Havale / Diğer Kartlar"]
+                    try:
+                        idx = odeme_y_liste.index(secilen_m['odeme_tipi'])
+                    except:
+                        idx = 0
+                    y_odeme_y = st.selectbox("Nereden Ödendi?", odeme_y_liste, index=idx, key="duzenle_odeme")
+                    
+                    c_gun, c_sil = st.columns(2)
+                    with c_gun:
+                        if st.form_submit_button("Masrafı Güncelle"):
+                            veri = {"tarih": str(y_tarih), "aciklama": y_aciklama, "tutar": y_tutar, "odeme_tipi": y_odeme_y}
+                            if db_yaz(supabase.table("masraf").update(veri).eq("id", secilen_m['id'])):
+                                st.success("Masraf başarıyla güncellendi!")
+                                st.rerun()
+                    with c_sil:
+                        if st.form_submit_button("🗑️ Bu Masrafı SİL"):
+                            if db_yaz(supabase.table("masraf").delete().eq("id", secilen_m['id'])):
+                                st.warning("Masraf sistemden tamamen silindi!")
+                                st.rerun()
+        else:
+            st.write("Sistemde henüz kayıtlı masraf yok.")
 
-    # --- YENİ EKLENEN MASRAF FİLTRELEME VE LİSTELEME ALANI ---
+    st.divider()
+
+    # --- MASRAF FİLTRELEME VE LİSTELEME ALANI ---
     st.subheader("📋 Geçmiş Masraf Kayıtları ve Filtreleme")
     masraflar = db_oku(supabase.table("masraf").select("*"))
     
@@ -302,7 +349,7 @@ elif menu == "Masraf Girişi":
         df_masraf = pd.DataFrame(masraflar)
         df_masraf['tarih'] = pd.to_datetime(df_masraf['tarih']).dt.date
         
-        # Filtreleme Menüsü (Açılıp kapanabilir)
+        # Filtreleme Menüsü
         with st.expander("🔍 Filtreleme Seçenekleri", expanded=True):
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -347,7 +394,7 @@ elif menu == "Masraf Girişi":
         # Filtre sonucuna göre toplam tutar
         st.info(f"📊 Tablodaki Masrafların Toplamı: **{df_masraf['tutar'].sum():,.2f} ₺**")
         
-        # Excel İndirme Butonu (Sadece filtrelenenleri indirir)
+        # Excel İndirme Butonu
         dosya_masraf, uzanti_m, mime_m = excel_indir(df_masraf[['tarih', 'aciklama', 'tutar', 'odeme_tipi']])
         st.download_button(
             label="📥 Ekranda Görünen Masrafları Excel'e İndir", 
