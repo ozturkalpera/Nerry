@@ -82,19 +82,15 @@ def platform_sayfasi(platform_adi):
     with tab1:
         st.subheader("Satışları Gir")
         
-        # --- KUTUCUKLARI GÜVENLİ SIFIRLAMA YÖNTEMİ ---
-        form_key_name = f"{platform_adi}_form_key"
-        if form_key_name not in st.session_state:
-            st.session_state[form_key_name] = 0
-            
-        with st.form(f"{platform_adi}_satis_form_{st.session_state[form_key_name]}"):
+        # SADELEŞTİRİLDİ: Sadece clear_on_submit=True bırakıldı, içerideki st.rerun() silindi!
+        with st.form(f"{platform_adi}_satis_form", clear_on_submit=True):
             tarih = st.date_input("Satış Tarihi", datetime.date.today())
             col1, col2 = st.columns(2)
-            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0)
-            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0)
+            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_s_on")
+            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_s_kap")
             
             if st.form_submit_button("Satışları Kaydet"):
-                hata_var = False
+                hata = False
                 for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
                     if tutar > 0:
                         ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", o_tip))
@@ -119,13 +115,10 @@ def platform_sayfasi(platform_adi):
                             db_yaz(supabase.table("platform_satis").insert(veri))
                         else:
                             st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
-                            hata_var = True
+                            hata = True
                 
-                # Sadece tutar girildiyse ve hata yoksa sayfayı yenileyip kutuları temizle
-                if not hata_var and (online > 0 or kapida > 0):
-                    st.session_state[form_key_name] += 1
-                    st.success("Satışlar başarıyla kaydedildi!")
-                    st.rerun()
+                if not hata and (online > 0 or kapida > 0):
+                    st.success("Satışlar başarıyla kaydedildi! Kutu içerikleri temizlendi.")
 
     with tab2:
         st.subheader("⏳ Bankaya Yatması Beklenen Paralar")
@@ -202,7 +195,6 @@ def platform_sayfasi(platform_adi):
         else:
             st.info("Henüz tahsil edilmiş (Ödendi olarak işaretlenmiş) bir kayıt bulunmuyor.")
 
-
     with tab3:
         st.subheader("Komisyon ve Kesinti Oranlarını Öğret")
         ayarlar = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi))
@@ -237,10 +229,7 @@ def platform_sayfasi(platform_adi):
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     
-    if "ciro_form_key" not in st.session_state:
-        st.session_state.ciro_form_key = 0
-        
-    with st.form(f"ciro_form_{st.session_state.ciro_form_key}"):
+    with st.form("ciro_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
             tarih = st.date_input("Tarih", datetime.date.today())
@@ -255,9 +244,7 @@ if menu == "Günlük Dükkan Cirosu":
         if st.form_submit_button("Ciro Kaydet"):
             veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
             if db_yaz(supabase.table("ciro").insert(veri)):
-                st.session_state.ciro_form_key += 1
                 st.success("Dükkan Cirosu Kaydedildi!")
-                st.rerun()
 
     st.divider()
     
@@ -291,10 +278,7 @@ if menu == "Günlük Dükkan Cirosu":
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
     
-    if "masraf_form_key" not in st.session_state:
-        st.session_state.masraf_form_key = 0
-        
-    with st.form(f"masraf_form_{st.session_state.masraf_form_key}"):
+    with st.form("masraf_form", clear_on_submit=True):
         tarih = st.date_input("Tarih", datetime.date.today())
         aciklama = st.text_input("Açıklama")
         tutar = st.number_input("Tutar (₺)", min_value=0.0)
@@ -308,18 +292,14 @@ elif menu == "Masraf Girişi":
         if st.form_submit_button("Masrafı Kaydet"):
             veri = {"tarih": str(tarih), "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme_y}
             if db_yaz(supabase.table("masraf").insert(veri)):
-                st.session_state.masraf_form_key += 1
                 st.success("Masraf Kaydedildi!")
-                st.rerun()
 
 elif menu == "Kasa Yönetimi (Virman)":
     st.header("Kasa Yönetimi ve Virman")
     secilen = st.date_input("İşlem Tarihi", datetime.date.today())
     
     st.subheader("Güne Başlangıç")
-    if "acilis_form_key" not in st.session_state:
-        st.session_state.acilis_form_key = 0
-    with st.form(f"acilis_form_{st.session_state.acilis_form_key}"):
+    with st.form("acilis_form", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1: k1_acilis = st.number_input("Kasa 1 Açılış (₺)", min_value=0.0)
         with c2: k2_acilis = st.number_input("Kasa 2 Açılış (₺)", min_value=0.0)
@@ -331,14 +311,10 @@ elif menu == "Kasa Yönetimi (Virman)":
                     {"tarih": str(secilen), "islem_tipi": "Açılış", "alan": "Kasa 1", "tutar": k1_acilis},
                     {"tarih": str(secilen), "islem_tipi": "Açılış", "alan": "Kasa 2", "tutar": k2_acilis}
                 ])):
-                    st.session_state.acilis_form_key += 1
                     st.success("Açılışlar Kaydedildi!")
-                    st.rerun()
 
     st.subheader("Kasalar Arası Virman")
-    if "virman_form_key" not in st.session_state:
-        st.session_state.virman_form_key = 0
-    with st.form(f"virman_form_{st.session_state.virman_form_key}"):
+    with st.form("virman_form", clear_on_submit=True):
         c1, c2, c3, c4 = st.columns(4)
         with c1: gonderen = st.selectbox("Gönderen", ["Kasa 1", "Kasa 2"])
         with c2: alan = st.selectbox("Alan", ["Kasa 2", "Kasa 1"])
@@ -348,9 +324,7 @@ elif menu == "Kasa Yönetimi (Virman)":
             if st.form_submit_button("Virman Yap"):
                 if gonderen != alan and tutar_v > 0:
                     if db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Virman", "gonderen": gonderen, "alan": alan, "tutar": tutar_v})):
-                        st.session_state.virman_form_key += 1
                         st.success("Transfer Kaydedildi!")
-                        st.rerun()
 
     st.divider()
     st.subheader("📊 Günün Kasa Özetleri")
