@@ -62,7 +62,7 @@ if st.sidebar.button("Çıkış Yap"):
 # --- PLATFORM (YS / TRENDYOL) FONKSİYONU ---
 def platform_sayfasi(platform_adi):
     st.header(f"📦 {platform_adi} Yönetimi")
-    tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret (Ayarlar)"])
+    tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi (Toplu Ödeme)", "⚙️ Sisteme Öğret (Ayarlar)"])
     
     with tab1:
         st.subheader("Satışları Gir")
@@ -94,16 +94,49 @@ def platform_sayfasi(platform_adi):
         bekleyenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Bekliyor"))
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
-            st.dataframe(df[['tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi']], use_container_width=True)
-            with st.form(f"{platform_adi}_tahsilat_form"):
-                secenekler = [f"{b['id']} - {b['odeme_tipi']} | Net: {b['net']} ₺" for b in bekleyenler]
-                secim = st.selectbox("Hesaba Yatan Ödemeyi Seçin", secenekler, key=f"{platform_adi}_tahsilat_secim")
-                if st.form_submit_button("Tahsil Edildi (Yattı) Olarak İşaretle"):
-                    secili_id = int(secim.split(" - ")[0])
-                    if db_yaz(supabase.table("platform_satis").update({"durum": "Tahsil Edildi"}).eq("id", secili_id)):
-                        st.success("İşaretlendi!")
-                        st.rerun()
-            st.info(f"**Toplam Bekleyen:** {df['net'].sum():,.2f} ₺")
+            
+            # --- YENİ EKLENEN TOPLU SEÇİM ÖZELLİĞİ ---
+            # Seçim yapabilmen için tabloya "Seç" adında bir tik kutusu sütunu ekliyoruz
+            df.insert(0, "Seç", False)
+            st.info("💡 **İpucu:** Hesabınıza yatan ödemeleri soldaki kutucuklardan işaretleyin. Seçtiklerinizin toplamı aşağıda otomatik hesaplanacaktır.")
+            
+            # Tabloyu düzenlenebilir (tiklenebilir) olarak ekrana bas
+            edited_df = st.data_editor(
+                df[['Seç', 'id', 'tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi']],
+                column_config={
+                    "Seç": st.column_config.CheckboxColumn("Tik (Seç)", default=False),
+                    "id": None, # ID sütununu gizliyoruz ki kafa karıştırmasın
+                    "tarih": "Satış Tarihi",
+                    "odeme_tipi": "Ödeme Tipi",
+                    "net": st.column_config.NumberColumn("Net Tutar (₺)", format="%.2f ₺"),
+                    "tahsilat_tarihi": "Beklenen Ödeme Tarihi"
+                },
+                disabled=['tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi'], # Sadece "Seç" kutusu tıklanabilsin
+                hide_index=True,
+                use_container_width=True,
+                key=f"{platform_adi}_editor"
+            )
+            
+            # Seçilenleri hesapla
+            secilenler = edited_df[edited_df["Seç"] == True]
+            secilen_toplam = secilenler["net"].sum()
+            
+            # Toplam Durumlarını Göster
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"Tüm Bekleyenlerin Toplamı: **{df['net'].sum():,.2f} ₺**")
+            with col2:
+                st.success(f"✔️ Seçtiklerinin Toplamı: **{secilen_toplam:,.2f} ₺**")
+            
+            # Toplu Ödeme Butonu
+            if st.button("✅ Seçili Olanları 'ÖDENDİ' Olarak İşaretle", key=f"{platform_adi}_odeme_btn"):
+                if not secilenler.empty:
+                    for idx in secilenler["id"]:
+                        db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
+                    st.success("Seçilen tüm satışlar 'Ödendi' olarak başarıyla güncellendi!")
+                    st.rerun()
+                else:
+                    st.warning("Lütfen listeden en az bir tane satış seçin.")
         else:
             st.success("Bekleyen alacağınız bulunmuyor.")
 
@@ -119,13 +152,11 @@ def platform_sayfasi(platform_adi):
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("### 🌐 Online Ödeme")
-                # KEY EKLENEREK HATA ÇÖZÜLDÜ
                 y_o_kom = st.number_input("Komisyon (%)", value=float(o_kom), key=f"{platform_adi}_o_kom")
                 y_o_stop = st.number_input("Stopaj (%)", value=float(o_stop), key=f"{platform_adi}_o_stop")
                 y_o_vade = st.number_input("Vade (Gün)", value=int(o_vade), step=1, key=f"{platform_adi}_o_vade")
             with c2:
                 st.markdown("### 🛵 Kapıda Ödeme")
-                # KEY EKLENEREK HATA ÇÖZÜLDÜ
                 y_k_kom = st.number_input("Komisyon (%)", value=float(k_kom), key=f"{platform_adi}_k_kom")
                 y_k_stop = st.number_input("Stopaj (%)", value=float(k_stop), key=f"{platform_adi}_k_stop")
                 y_k_vade = st.number_input("Vade (Gün)", value=int(k_vade), step=1, key=f"{platform_adi}_k_vade")
