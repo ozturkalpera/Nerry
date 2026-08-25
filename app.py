@@ -7,8 +7,25 @@ st.set_page_config(page_title="Cafe Yönetim", layout="wide")
 
 # --- SUPABASE BAĞLANTISI ---
 url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]  # service_role key kullanman tavsiye edilir
+key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
+
+# --- GÜVENLİ (ÇÖKMEYİ ENGELLEYEN) VERİTABANI FONKSİYONLARI ---
+def db_oku(sorgu):
+    try:
+        sonuc = sorgu.execute()
+        return sonuc.data if sonuc.data else []
+    except Exception as e:
+        st.error(f"⚠️ Veri Okuma Hatası (Lütfen bu hatayı bana ilet): {e}")
+        return []
+
+def db_yaz(sorgu):
+    try:
+        sorgu.execute()
+        return True
+    except Exception as e:
+        st.error(f"⚠️ İşlem Başarısız Oldu. Hata Detayı: {e}")
+        return False
 
 # --- GİRİŞ EKRANI ---
 if 'giris_yapildi' not in st.session_state:
@@ -42,63 +59,57 @@ if st.sidebar.button("Çıkış Yap"):
     st.session_state.giris_yapildi = False
     st.rerun()
 
-# --- PLATFORM (YS / TRENDYOL) FONKSİYONU (SEVDİĞİN TASARIM) ---
+# --- PLATFORM (YS / TRENDYOL) FONKSİYONU ---
 def platform_sayfasi(platform_adi):
     st.header(f"📦 {platform_adi} Yönetimi")
     tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret (Ayarlar)"])
     
-    # SEKME 1: SATIŞ
     with tab1:
         st.subheader("Satışları Gir")
         with st.form(f"{platform_adi}_form"):
             tarih = st.date_input("Satış Tarihi", datetime.date.today())
             col1, col2 = st.columns(2)
-            with col1:
-                online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0)
-            with col2:
-                kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0)
+            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0)
+            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0)
             
             if st.form_submit_button("Satışları Kaydet"):
                 for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
                     if tutar > 0:
-                        ayar_getir = supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", o_tip).execute()
-                        if len(ayar_getir.data) > 0:
-                            ayar = ayar_getir.data[0]
+                        ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", o_tip))
+                        if len(ayar_getir) > 0:
+                            ayar = ayar_getir[0]
                             kesinti = tutar * ((float(ayar['komisyon']) + float(ayar['stopaj'])) / 100)
                             net = tutar - kesinti
                             tahsilat_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
                             
                             veri = {"tarih": str(tarih), "platform": platform_adi, "odeme_tipi": o_tip, "brut": tutar, "kesinti": kesinti, "net": net, "tahsilat_tarihi": str(tahsilat_tarihi), "durum": "Bekliyor"}
-                            supabase.table("platform_satis").insert(veri).execute()
+                            db_yaz(supabase.table("platform_satis").insert(veri))
                         else:
                             st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
                             return
-                st.success("Satışlar başarıyla kaydedildi ve alacaklara eklendi!")
+                st.success("Satışlar başarıyla kaydedildi!")
 
-    # SEKME 2: TAHSİLAT TAKİBİ
     with tab2:
         st.subheader("Bankaya Yatması Beklenen Paralar")
-        bekleyenler = supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Bekliyor").execute().data
+        bekleyenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Bekliyor"))
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
             st.dataframe(df[['tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi']], use_container_width=True)
-            
             with st.form(f"{platform_adi}_tahsilat_form"):
-                secenekler = [f"{b['id']} - {b['odeme_tipi']} | Net: {b['net']} ₺ | Tarih: {b['tahsilat_tarihi']}" for b in bekleyenler]
+                secenekler = [f"{b['id']} - {b['odeme_tipi']} | Net: {b['net']} ₺" for b in bekleyenler]
                 secim = st.selectbox("Hesaba Yatan Ödemeyi Seçin", secenekler)
                 if st.form_submit_button("Tahsil Edildi (Yattı) Olarak İşaretle"):
                     secili_id = int(secim.split(" - ")[0])
-                    supabase.table("platform_satis").update({"durum": "Tahsil Edildi"}).eq("id", secili_id).execute()
-                    st.success("İşaretlendi!")
-                    st.rerun()
+                    if db_yaz(supabase.table("platform_satis").update({"durum": "Tahsil Edildi"}).eq("id", secili_id)):
+                        st.success("İşaretlendi!")
+                        st.rerun()
             st.info(f"**Toplam Bekleyen:** {df['net'].sum():,.2f} ₺")
         else:
             st.success("Bekleyen alacağınız bulunmuyor.")
 
-    # SEKME 3: AYARLAR
     with tab3:
         st.subheader("Komisyon ve Kesinti Oranlarını Öğret")
-        ayarlar = supabase.table("ayarlar").select("*").eq("platform", platform_adi).execute().data
+        ayarlar = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi))
         o_kom = o_stop = o_vade = k_kom = k_stop = k_vade = 0
         for a in ayarlar:
             if a['odeme_tipi'] == 'Online': o_kom, o_stop, o_vade = a['komisyon'], a['stopaj'], a['vade']
@@ -118,11 +129,11 @@ def platform_sayfasi(platform_adi):
                 y_k_vade = st.number_input("Vade (Gün)", value=int(k_vade), step=1)
             
             if st.form_submit_button("Ayarları Güncelle"):
-                supabase.table("ayarlar").delete().eq("platform", platform_adi).execute()
-                supabase.table("ayarlar").insert([
+                db_yaz(supabase.table("ayarlar").delete().eq("platform", platform_adi))
+                db_yaz(supabase.table("ayarlar").insert([
                     {"platform": platform_adi, "odeme_tipi": "Online", "komisyon": y_o_kom, "stopaj": y_o_stop, "vade": y_o_vade},
                     {"platform": platform_adi, "odeme_tipi": "Kapıda Ödeme", "komisyon": y_k_kom, "stopaj": y_k_stop, "vade": y_k_vade}
-                ]).execute()
+                ]))
                 st.success("Ayarlar başarıyla kaydedildi!")
                 st.rerun()
 
@@ -143,8 +154,8 @@ if menu == "Günlük Dükkan Cirosu":
         
         if st.form_submit_button("Ciro Kaydet"):
             veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
-            supabase.table("ciro").insert(veri).execute()
-            st.success("Dükkan Cirosu Kaydedildi!")
+            if db_yaz(supabase.table("ciro").insert(veri)):
+                st.success("Dükkan Cirosu Kaydedildi!")
 
 elif menu == "Yemek Sepeti Yönetimi":
     platform_sayfasi("Yemek Sepeti")
@@ -161,8 +172,8 @@ elif menu == "Masraf Girişi":
         odeme_y = st.selectbox("Nereden Ödendi?", ["Nakit - Kasa 1", "Nakit - Kasa 2", "Havale / Kredi Kartı"])
         if st.form_submit_button("Masrafı Kaydet"):
             veri = {"tarih": str(tarih), "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme_y}
-            supabase.table("masraf").insert(veri).execute()
-            st.success("Masraf Kaydedildi!")
+            if db_yaz(supabase.table("masraf").insert(veri)):
+                st.success("Masraf Kaydedildi!")
 
 elif menu == "Kasa Yönetimi (Virman)":
     st.header("Kasa Yönetimi ve Virman")
@@ -176,12 +187,12 @@ elif menu == "Kasa Yönetimi (Virman)":
         with c3:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Kaydet"):
-                supabase.table("kasa_islemleri").delete().eq("tarih", str(secilen)).eq("islem_tipi", "Açılış").execute()
-                supabase.table("kasa_islemleri").insert([
+                db_yaz(supabase.table("kasa_islemleri").delete().eq("tarih", str(secilen)).eq("islem_tipi", "Açılış"))
+                if db_yaz(supabase.table("kasa_islemleri").insert([
                     {"tarih": str(secilen), "islem_tipi": "Açılış", "alan": "Kasa 1", "tutar": k1_acilis},
                     {"tarih": str(secilen), "islem_tipi": "Açılış", "alan": "Kasa 2", "tutar": k2_acilis}
-                ]).execute()
-                st.success("Açılışlar Kaydedildi!")
+                ])):
+                    st.success("Açılışlar Kaydedildi!")
 
     st.subheader("Kasalar Arası Virman")
     with st.form("virman_form"):
@@ -193,22 +204,22 @@ elif menu == "Kasa Yönetimi (Virman)":
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Virman Yap"):
                 if gonderen != alan and tutar_v > 0:
-                    supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Virman", "gonderen": gonderen, "alan": alan, "tutar": tutar_v}).execute()
-                    st.success("Transfer Kaydedildi!")
+                    if db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Virman", "gonderen": gonderen, "alan": alan, "tutar": tutar_v})):
+                        st.success("Transfer Kaydedildi!")
 
     st.divider()
     st.subheader("📊 Günün Kasa Özetleri")
     
-    cirolar = supabase.table("ciro").select("*").eq("tarih", str(secilen)).execute().data
-    masraflar = supabase.table("masraf").select("*").eq("tarih", str(secilen)).execute().data
-    islemler = supabase.table("kasa_islemleri").select("*").eq("tarih", str(secilen)).execute().data
+    cirolar = db_oku(supabase.table("ciro").select("*").eq("tarih", str(secilen)))
+    masraflar = db_oku(supabase.table("masraf").select("*").eq("tarih", str(secilen)))
+    islemler = db_oku(supabase.table("kasa_islemleri").select("*").eq("tarih", str(secilen)))
 
     def hesapla(k_adi):
-        a = sum([i['tutar'] for i in islemler if i['islem_tipi'] == 'Açılış' and i['alan'] == k_adi])
-        g = sum([(c['nakit'] + c['pavo_nakit']) for c in cirolar if c['kasa'] == k_adi])
-        c = sum([m['tutar'] for m in masraflar if m['odeme_tipi'] == f"Nakit - {k_adi}"])
-        vg = sum([i['tutar'] for i in islemler if i['islem_tipi'] == 'Virman' and i['alan'] == k_adi])
-        vgi = sum([i['tutar'] for i in islemler if i['islem_tipi'] == 'Virman' and i['gonderen'] == k_adi])
+        a = sum([i['tutar'] for i in islemler if i.get('islem_tipi') == 'Açılış' and i.get('alan') == k_adi])
+        g = sum([(c.get('nakit', 0) + c.get('pavo_nakit', 0)) for c in cirolar if c.get('kasa') == k_adi])
+        c = sum([m['tutar'] for m in masraflar if m.get('odeme_tipi') == f"Nakit - {k_adi}"])
+        vg = sum([i['tutar'] for i in islemler if i.get('islem_tipi') == 'Virman' and i.get('alan') == k_adi])
+        vgi = sum([i['tutar'] for i in islemler if i.get('islem_tipi') == 'Virman' and i.get('gonderen') == k_adi])
         return a, g, c, vg, vgi, (a + g + vg - c - vgi)
 
     k1_a, k1_g, k1_c, k1_vg, k1_vgi, k1_net = hesapla("Kasa 1")
@@ -217,19 +228,19 @@ elif menu == "Kasa Yönetimi (Virman)":
     c1, c2 = st.columns(2)
     with c1:
         st.info("### KASA 1 DURUMU")
-        st.write(f"Açılış: {k1_a:,.2f} ₺\n\nNakit Giriş: + {k1_g:,.2f} ₺\n\nNakit Çıkış (Masraf): - {k1_c:,.2f} ₺\n\nVirman Dengesi: {(k1_vg - k1_vgi):,.2f} ₺")
+        st.write(f"Açılış: {k1_a:,.2f} ₺\n\nNakit Giriş: + {k1_g:,.2f} ₺\n\nNakit Çıkış: - {k1_c:,.2f} ₺\n\nVirman Dengesi: {(k1_vg - k1_vgi):,.2f} ₺")
         st.metric("KASA 1'DE OLMASI GEREKEN", f"{k1_net:,.2f} ₺")
     with c2:
         st.success("### KASA 2 DURUMU")
-        st.write(f"Açılış: {k2_a:,.2f} ₺\n\nNakit Giriş: + {k2_g:,.2f} ₺\n\nNakit Çıkış (Masraf): - {k2_c:,.2f} ₺\n\nVirman Dengesi: {(k2_vg - k2_vgi):,.2f} ₺")
+        st.write(f"Açılış: {k2_a:,.2f} ₺\n\nNakit Giriş: + {k2_g:,.2f} ₺\n\nNakit Çıkış: - {k2_c:,.2f} ₺\n\nVirman Dengesi: {(k2_vg - k2_vgi):,.2f} ₺")
         st.metric("KASA 2'DE OLMASI GEREKEN", f"{k2_net:,.2f} ₺")
 
 elif menu == "Raporlar":
     st.header("Sistem Raporları")
     st.subheader("Platform Satışları (Tümü)")
-    sat = supabase.table("platform_satis").select("*").execute().data
+    sat = db_oku(supabase.table("platform_satis").select("*"))
     if sat: st.dataframe(pd.DataFrame(sat)[['tarih', 'platform', 'odeme_tipi', 'brut', 'net', 'durum']])
     
     st.subheader("Dükkan Cirosu")
-    cir = supabase.table("ciro").select("*").execute().data
+    cir = db_oku(supabase.table("ciro").select("*"))
     if cir: st.dataframe(pd.DataFrame(cir))
