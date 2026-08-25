@@ -77,7 +77,7 @@ if st.sidebar.button("Çıkış Yap"):
 # --- PLATFORM (YS / TRENDYOL) FONKSİYONU ---
 def platform_sayfasi(platform_adi):
     st.header(f"📦 {platform_adi} Yönetimi")
-    tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret (Ayarlar)"])
+    tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi (Toplu Ödeme)", "⚙️ Sisteme Öğret (Ayarlar)"])
     
     with tab1:
         st.subheader("Satışları Gir")
@@ -227,7 +227,6 @@ def platform_sayfasi(platform_adi):
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     
-    # --- YUKARISI: FORM ---
     with st.form("ciro_form"):
         c1, c2 = st.columns(2)
         with c1:
@@ -244,17 +243,14 @@ if menu == "Günlük Dükkan Cirosu":
             veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
             if db_yaz(supabase.table("ciro").insert(veri)):
                 st.success("Dükkan Cirosu Kaydedildi!")
-                st.rerun() # Girdiği an alttaki tabloyu yenilemesi için
 
     st.divider()
     
-    # --- AŞAĞISI: GEÇMİŞ CİROLAR TABLOSU ---
     st.subheader("📋 Geçmiş Ciro Kayıtları")
     cirolar = db_oku(supabase.table("ciro").select("*"))
     
     if cirolar:
         df_ciro = pd.DataFrame(cirolar)
-        # En yeni tarih en üstte çıksın diye sıralıyoruz
         df_ciro = df_ciro.sort_values(by="tarih", ascending=False)
         
         st.dataframe(
@@ -272,20 +268,14 @@ if menu == "Günlük Dükkan Cirosu":
             use_container_width=True
         )
         
-        # Excel Butonu
         dosya, uzanti, mime = excel_indir(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']])
         st.download_button(label="📥 Ciro Kayıtlarını Excel'e İndir", data=dosya, file_name=f"Gunluk_Ciro_Gecmisi.{uzanti}", mime=mime)
     else:
         st.info("Sistemde henüz kaydedilmiş bir ciro bulunmuyor.")
 
-elif menu == "Yemek Sepeti Yönetimi":
-    platform_sayfasi("Yemek Sepeti")
-
-elif menu == "Trendyol Yönetimi":
-    platform_sayfasi("Trendyol")
-
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
+    
     with st.form("masraf_form"):
         tarih = st.date_input("Tarih", datetime.date.today())
         aciklama = st.text_input("Açıklama")
@@ -301,6 +291,72 @@ elif menu == "Masraf Girişi":
             veri = {"tarih": str(tarih), "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme_y}
             if db_yaz(supabase.table("masraf").insert(veri)):
                 st.success("Masraf Kaydedildi!")
+
+    st.divider()
+
+    # --- YENİ EKLENEN MASRAF FİLTRELEME VE LİSTELEME ALANI ---
+    st.subheader("📋 Geçmiş Masraf Kayıtları ve Filtreleme")
+    masraflar = db_oku(supabase.table("masraf").select("*"))
+    
+    if masraflar:
+        df_masraf = pd.DataFrame(masraflar)
+        df_masraf['tarih'] = pd.to_datetime(df_masraf['tarih']).dt.date
+        
+        # Filtreleme Menüsü (Açılıp kapanabilir)
+        with st.expander("🔍 Filtreleme Seçenekleri", expanded=True):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                min_date = df_masraf['tarih'].min()
+                max_date = df_masraf['tarih'].max()
+                tarih_araligi = st.date_input("Tarih Aralığı Seç", [min_date, max_date])
+            with c2:
+                aranan_kelime = st.text_input("Açıklama İçinde Ara (Örn: Manav)")
+            with c3:
+                odeme_yerleri = df_masraf['odeme_tipi'].unique().tolist()
+                secilen_odeme = st.multiselect("Nereden Ödendi?", odeme_yerleri, default=odeme_yerleri)
+        
+        # Filtreleri DataFrame'e Uygulama
+        if len(tarih_araligi) == 2:
+            baslama, bitis = tarih_araligi
+            df_masraf = df_masraf[(df_masraf['tarih'] >= baslama) & (df_masraf['tarih'] <= bitis)]
+        elif len(tarih_araligi) == 1:
+            baslama = tarih_araligi[0]
+            df_masraf = df_masraf[df_masraf['tarih'] == baslama]
+            
+        if aranan_kelime:
+            df_masraf = df_masraf[df_masraf['aciklama'].str.contains(aranan_kelime, case=False, na=False)]
+            
+        if secilen_odeme:
+            df_masraf = df_masraf[df_masraf['odeme_tipi'].isin(secilen_odeme)]
+            
+        # Filtrelenmiş halini en yeniden eskiye sırala
+        df_masraf = df_masraf.sort_values(by="tarih", ascending=False)
+        
+        st.dataframe(
+            df_masraf[['tarih', 'aciklama', 'tutar', 'odeme_tipi']],
+            column_config={
+                "tarih": "Tarih",
+                "aciklama": "Açıklama",
+                "tutar": st.column_config.NumberColumn("Tutar", format="%.2f ₺"),
+                "odeme_tipi": "Nereden Ödendi?"
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # Filtre sonucuna göre toplam tutar
+        st.info(f"📊 Tablodaki Masrafların Toplamı: **{df_masraf['tutar'].sum():,.2f} ₺**")
+        
+        # Excel İndirme Butonu (Sadece filtrelenenleri indirir)
+        dosya_masraf, uzanti_m, mime_m = excel_indir(df_masraf[['tarih', 'aciklama', 'tutar', 'odeme_tipi']])
+        st.download_button(
+            label="📥 Ekranda Görünen Masrafları Excel'e İndir", 
+            data=dosya_masraf, 
+            file_name=f"Filtrelenmis_Masraf_Raporu.{uzanti_m}", 
+            mime=mime_m
+        )
+    else:
+        st.info("Sistemde henüz kaydedilmiş bir masraf bulunmuyor.")
 
 elif menu == "Kasa Yönetimi (Virman)":
     st.header("Kasa Yönetimi ve Virman")
@@ -371,6 +427,8 @@ elif menu == "Raporlar":
         df_sat = pd.DataFrame(sat)
         if 'komisyon_tutari' not in df_sat.columns: df_sat['komisyon_tutari'] = 0.0
         if 'stopaj_tutari' not in df_sat.columns: df_sat['stopaj_tutari'] = 0.0
+        
+        df_sat = df_sat.sort_values(by="tarih", ascending=False)
         st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'durum']])
         dosya, uzanti, mime = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
         st.download_button(label="📥 Platform Satışlarını Excel'e İndir", data=dosya, file_name=f"Platform_Satislar_Raporu.{uzanti}", mime=mime)
@@ -381,6 +439,7 @@ elif menu == "Raporlar":
     cir = db_oku(supabase.table("ciro").select("*"))
     if cir: 
         df_cir = pd.DataFrame(cir)
+        df_cir = df_cir.sort_values(by="tarih", ascending=False)
         st.dataframe(df_cir)
         dosya2, uzanti2, mime2 = excel_indir(df_cir)
         st.download_button(label="📥 Dükkan Cirosunu Excel'e İndir", data=dosya2, file_name=f"Dukkan_Cirosu_Raporu.{uzanti2}", mime=mime2)
