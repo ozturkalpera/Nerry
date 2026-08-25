@@ -198,6 +198,7 @@ elif menu == "5. Kasa & Virman (Detaylı)":
         st.metric("KASA 2'DE OLMASI GEREKEN", f"{k2_net:,.2f} ₺")
 
 # --- 6. AYARLAR VE RAPORLAR (DETAYLI) ---
+# --- 6. AYARLAR VE RAPORLAR (DETAYLI) ---
 elif menu == "6. Ayarlar ve Raporlar":
     st.header("Sistem Ayarları")
     
@@ -220,13 +221,13 @@ elif menu == "6. Ayarlar ve Raporlar":
             st.markdown(f"### 🌐 {platform_secim} - Online Ödeme")
             y_o_kom = st.number_input("Komisyon (%)", value=float(o_kom), format="%.2f", key="o_kom")
             y_o_stop = st.number_input("Stopaj (%)", value=float(o_stop), format="%.2f", key="o_stop")
-            y_o_vade = st.number_input("Kaç Gün Sonra Yatar?", value=int(o_vade), key="o_vade")
+            y_o_vade = st.number_input("Kaç Gün Sonra Yatar?", value=int(o_vade), step=1, key="o_vade")
             
         with col2:
             st.markdown(f"### 🛵 {platform_secim} - Kapıda Ödeme")
             y_k_kom = st.number_input("Komisyon (%)", value=float(k_kom), format="%.2f", key="k_kom")
             y_k_stop = st.number_input("Stopaj (%)", value=float(k_stop), format="%.2f", key="k_stop")
-            y_k_vade = st.number_input("Kaç Gün Sonra Yatar?", value=int(k_vade), key="k_vade")
+            y_k_vade = st.number_input("Kaç Gün Sonra Yatar?", value=int(k_vade), step=1, key="k_vade")
             
         st.markdown("<br>", unsafe_allow_html=True)
         if st.form_submit_button("Ayarları Sisteme Öğret (Kaydet)"):
@@ -234,8 +235,8 @@ elif menu == "6. Ayarlar ve Raporlar":
             supabase.table("ayarlar").delete().eq("platform", platform_secim).execute()
             # Yeni ayarları Online ve Kapıda olarak iki satır halinde ekle
             supabase.table("ayarlar").insert([
-                {"platform": platform_secim, "odeme_tipi": "Online", "komisyon": y_o_kom, "stopaj": y_o_stop, "vade": y_o_vade},
-                {"platform": platform_secim, "odeme_tipi": "Kapıda Ödeme", "komisyon": y_k_kom, "stopaj": y_k_stop, "vade": y_k_vade}
+                {"platform": platform_secim, "odeme_tipi": "Online", "komisyon": y_o_kom, "stopaj": y_o_stop, "vade": int(y_o_vade)},
+                {"platform": platform_secim, "odeme_tipi": "Kapıda Ödeme", "komisyon": y_k_kom, "stopaj": y_k_stop, "vade": int(y_k_vade)}
             ]).execute()
             st.success(f"{platform_secim} ayarları başarıyla güncellendi!")
             st.rerun()
