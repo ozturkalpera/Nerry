@@ -133,7 +133,21 @@ def masraf_kaydet_cb():
         
     veri = {"tarih": str(tarih), "masraf_tipi": tip, "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme}
     if db_yaz(supabase.table("masraf").insert(veri)):
-        st.session_state["masraf_msg"] = ("success", "Masraf başarıyla kaydedildi!")
+        # EĞER MASRAF BİR CARİYE YAZILDIYSA, CARİ İŞLEMLERE OTOMATİK BORÇ OLARAK KAYDET
+        if odeme.startswith("Cari - "):
+            cari_adi = odeme.replace("Cari - ", "")
+            cari_veri = {
+                "tarih": str(tarih),
+                "cari_adi": cari_adi,
+                "islem_tipi": "Gelen Fatura (Bize Borç Yazar)",
+                "tutar": tutar,
+                "aciklama": f"Masraf: {aciklama}"
+            }
+            db_yaz(supabase.table("cari_islemler").insert(cari_veri))
+            st.session_state["masraf_msg"] = ("success", f"Masraf başarıyla kaydedildi ve {cari_adi} hesabına borç olarak işlendi!")
+        else:
+            st.session_state["masraf_msg"] = ("success", "Masraf başarıyla kaydedildi!")
+            
         st.session_state["masraf_aciklama"] = ""
         st.session_state["masraf_tutar"] = 0.0
 
@@ -257,44 +271,16 @@ def platform_sayfasi(platform_adi):
             if 'komisyon_tutari' not in df.columns: df['komisyon_tutari'] = 0.0
             if 'stopaj_tutari' not in df.columns: df['stopaj_tutari'] = 0.0
             df.insert(0, "Seç", False)
-            
-            # BURASI GERİ GELDİ: Anlık hesaplama için sütun ayarları
-            edited_df = st.data_editor(
-                df[['Seç', 'id', 'tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']],
-                column_config={
-                    "Seç": st.column_config.CheckboxColumn("Tik (Seç)", default=False),
-                    "id": None, 
-                    "tarih": "Satış Tarihi",
-                    "odeme_tipi": "Ödeme Tipi",
-                    "brut": st.column_config.NumberColumn("Brüt", format="%.2f ₺"),
-                    "komisyon_tutari": st.column_config.NumberColumn("Komisyon", format="%.2f ₺"),
-                    "stopaj_tutari": st.column_config.NumberColumn("Stopaj", format="%.2f ₺"),
-                    "net": st.column_config.NumberColumn("Net Yatan", format="%.2f ₺"),
-                    "tahsilat_tarihi": "Yatacağı Tarih"
-                },
-                disabled=['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi'],
-                hide_index=True,
-                use_container_width=True,
-                key=f"{platform_adi}_editor"
-            )
-            
+            edited_df = st.data_editor(df[['Seç', 'id', 'tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']], hide_index=True, use_container_width=True, disabled=['id','tarih','odeme_tipi','brut','komisyon_tutari','stopaj_tutari','net','tahsilat_tarihi'])
             secilenler = edited_df[edited_df["Seç"] == True]
             
-            # BURASI GERİ GELDİ: Seçilenlerin Toplamı
             col1, col2 = st.columns(2)
             with col1: st.write(f"Tüm Bekleyenlerin Toplamı: **{df['net'].sum():,.2f} ₺**")
             with col2: st.success(f"✔️ Seçtiklerinin Toplamı: **{secilenler['net'].sum():,.2f} ₺**")
             
             if st.button("✅ Seçili Olanları 'ÖDENDİ' İşaretle"):
-                if not secilenler.empty:
-                    for idx in secilenler["id"]: 
-                        db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
-                    st.success("İşaretlendi!")
-                    st.rerun()
-                else:
-                    st.warning("Lütfen listeden en az bir tane satış seçin.")
-        else:
-            st.success("Bekleyen alacağınız bulunmuyor.")
+                for idx in secilenler["id"]: db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
+                st.rerun()
 
         odenenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Ödendi"))
         if odenenler:
@@ -409,6 +395,11 @@ elif menu == "Masraf Girişi":
         elif m_type == "warning": st.warning(m_text)
         del st.session_state["masraf_msg"]
         
+    # SİSTEMDEKİ CARİLERİ ÇEK VE ÖDEME YÖNTEMLERİNE EKLE
+    cariler_db = db_oku(supabase.table("cariler").select("*"))
+    cari_liste = [f"Cari - {c['isim']}" for c in cariler_db] if cariler_db else []
+    odeme_yontemleri = ["Nakit - Kasa 1", "Nakit - Kasa 2", "Halkbank Kk", "İşbank Kk", "Havale / Diğer Kartlar"] + cari_liste
+
     c1, c2 = st.columns(2)
     with c1:
         st.date_input("Tarih", datetime.date.today(), key="masraf_tarih")
@@ -416,7 +407,6 @@ elif menu == "Masraf Girişi":
         st.text_input("Açıklama", key="masraf_aciklama")
     with c2:
         st.number_input("Tutar (₺)", min_value=0.0, key="masraf_tutar")
-        odeme_yontemleri = ["Nakit - Kasa 1", "Nakit - Kasa 2", "Halkbank Kk", "İşbank Kk", "Havale / Diğer Kartlar", "Cari (Hesaba Yazdır)"]
         st.selectbox("Nereden Ödendi?", odeme_yontemleri, key="masraf_odeme")
     
     st.button("Masrafı Kaydet", on_click=masraf_kaydet_cb, type="primary")
@@ -449,12 +439,29 @@ elif menu == "Masraf Girişi":
                     c_gun, c_sil = st.columns(2)
                     with c_gun:
                         if st.form_submit_button("Güncelle"):
+                            # Eski masraf Cari ise carideki kaydı sil
+                            if str(secilen_m['odeme_tipi']).startswith("Cari - "):
+                                eski_c_adi = secilen_m['odeme_tipi'].replace("Cari - ", "")
+                                db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", eski_c_adi).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("aciklama", f"Masraf: {secilen_m['aciklama']}"))
+                            
+                            # Masrafı Güncelle
                             db_yaz(supabase.table("masraf").update({"tarih": str(y_tarih), "masraf_tipi": y_tip, "aciklama": y_aciklama, "tutar": y_tutar, "odeme_tipi": y_odeme_y}).eq("id", secilen_m['id']))
+                            
+                            # Yeni güncellenen ödeme yöntemi Cari ise hesaba yazdır
+                            if str(y_odeme_y).startswith("Cari - "):
+                                yeni_c_adi = y_odeme_y.replace("Cari - ", "")
+                                db_yaz(supabase.table("cari_islemler").insert({
+                                    "tarih": str(y_tarih), "cari_adi": yeni_c_adi, "islem_tipi": "Gelen Fatura (Bize Borç Yazar)", "tutar": y_tutar, "aciklama": f"Masraf: {y_aciklama}"
+                                }))
                             st.rerun()
                     with c_sil:
                         if st.form_submit_button("Sil"):
-                            db_yaz(supabase.table("masraf").delete().eq("id", secilen_m['id']))
-                            st.rerun()
+                            if db_yaz(supabase.table("masraf").delete().eq("id", secilen_m['id'])):
+                                # Eğer Cari hesaba yazılmışsa cariden de sil
+                                if str(secilen_m['odeme_tipi']).startswith("Cari - "):
+                                    sil_c_adi = secilen_m['odeme_tipi'].replace("Cari - ", "")
+                                    db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", sil_c_adi).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("aciklama", f"Masraf: {secilen_m['aciklama']}"))
+                                st.rerun()
 
     st.subheader("📋 Masraf Kayıtları ve Filtreleme")
     masraflar = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
@@ -688,6 +695,7 @@ elif menu == "Kasa Yönetimi (Virman)":
     def hesapla(k_adi):
         a = sum([i['tutar'] for i in islemler if i.get('islem_tipi') == 'Açılış' and i.get('alan') == k_adi])
         g = sum([(c.get('nakit', 0) + c.get('pavo_nakit', 0)) for c in cirolar if c.get('kasa') == k_adi])
+        # SADECE NAKİT ÇIKIŞ OLAN MASRAFLAR KASADAN DÜŞÜLÜR (CARİLER KASADAN DÜŞMEZ)
         c = sum([m['tutar'] for m in masraflar if m.get('odeme_tipi') == f"Nakit - {k_adi}"])
         vg = sum([i['tutar'] for i in islemler if i.get('islem_tipi') == 'Virman' and i.get('alan') == k_adi])
         vgi = sum([i['tutar'] for i in islemler if i.get('islem_tipi') == 'Virman' and i.get('gonderen') == k_adi])
