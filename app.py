@@ -184,7 +184,7 @@ menu = st.sidebar.radio("Menü", [
     "Masraf Girişi", 
     "Kasa Yönetimi (Virman)",
     "Personel & Puantaj",
-    "Cari (Tedarikçi) Yönetimi", # YENİ CARİ MENÜSÜ
+    "Cari (Tedarikçi) Yönetimi",
     "Raporlar"
 ])
 
@@ -356,7 +356,6 @@ elif menu == "Trendyol Yönetimi":
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
     
-    # Masraf Tiplerini Çek
     tipler_db = db_oku(supabase.table("masraf_tipleri").select("*"))
     tipler = [t['tip_adi'] for t in tipler_db] if tipler_db else ["Genel Masraf"]
 
@@ -384,7 +383,6 @@ elif menu == "Masraf Girişi":
         st.text_input("Açıklama", key="masraf_aciklama")
     with c2:
         st.number_input("Tutar (₺)", min_value=0.0, key="masraf_tutar")
-        # YENİLİK: CARİ SEÇENEĞİ EKLENDİ
         odeme_yontemleri = ["Nakit - Kasa 1", "Nakit - Kasa 2", "Halkbank Kk", "İşbank Kk", "Havale / Diğer Kartlar", "Cari (Hesaba Yazdır)"]
         st.selectbox("Nereden Ödendi?", odeme_yontemleri, key="masraf_odeme")
     
@@ -448,7 +446,6 @@ elif menu == "Masraf Girişi":
         st.dataframe(df_masraf[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']], hide_index=True, use_container_width=True)
         st.info(f"📊 Toplam Tutar: **{df_masraf['tutar'].sum():,.2f} ₺**")
 
-# --- YENİ EKLENEN CARİ YÖNETİMİ BÖLÜMÜ ---
 elif menu == "Cari (Tedarikçi) Yönetimi":
     st.header("🏢 Cari (Tedarikçi) Yönetimi")
     tab1, tab2, tab3 = st.tabs(["📈 Fatura & Ödeme Girişi", "📋 Cari Ekstre ve Bakiye", "⚙️ Tedarikçi Ekle"])
@@ -601,6 +598,69 @@ elif menu == "Kasa Yönetimi (Virman)":
                     st.success("İşlem kaydedildi!")
 
     st.divider()
+    
+    # --- YENİ: VİRMAN VE EKSİK/FAZLA DÜZENLEME BÖLÜMÜ ---
+    with st.expander("✏️ Virman ve Kasa Farkı Düzenle veya Sil", expanded=False):
+        st.info("Aşağıdan geçmiş bir virman veya sayım farkı kaydını seçip güncelleyebilir veya silebilirsiniz.")
+        gecmis_islemler = db_oku(supabase.table("kasa_islemleri").select("*").in_("islem_tipi", ["Virman", "Eksik", "Fazla"]).order("tarih", desc=True))
+        
+        if gecmis_islemler:
+            secenekler_k = {}
+            for i in gecmis_islemler:
+                if i['islem_tipi'] == 'Virman':
+                    lbl = f"{i['tarih']} | VİRMAN | {i['gonderen']} -> {i['alan']} | {i['tutar']} ₺"
+                elif i['islem_tipi'] == 'Eksik':
+                    lbl = f"{i['tarih']} | EKSİK ÇIKTI | {i['gonderen']} | {i['tutar']} ₺"
+                elif i['islem_tipi'] == 'Fazla':
+                    lbl = f"{i['tarih']} | FAZLA ÇIKTI | {i['alan']} | {i['tutar']} ₺"
+                secenekler_k[lbl] = i
+                
+            sec_k_str = st.selectbox("İşlem Seçin", ["Lütfen seçin..."] + list(secenekler_k.keys()))
+            
+            if sec_k_str != "Lütfen seçin...":
+                sec_k = secenekler_k[sec_k_str]
+                with st.form("kasa_duzenle_form"):
+                    try: k_tar = datetime.datetime.strptime(sec_k['tarih'], '%Y-%m-%d').date()
+                    except: k_tar = datetime.date.today()
+                    y_tarih = st.date_input("Tarih", value=k_tar)
+                    
+                    islem_turleri = ["Virman", "Eksik", "Fazla"]
+                    y_islem = st.selectbox("İşlem Tipi", islem_turleri, index=islem_turleri.index(sec_k['islem_tipi']))
+                    
+                    k_list = ["Kasa 1", "Kasa 2"]
+                    c_k1, c_k2 = st.columns(2)
+                    with c_k1:
+                        idx_g = k_list.index(sec_k['gonderen']) if sec_k.get('gonderen') in k_list else 0
+                        y_gon = st.selectbox("Gönderen Kasa (Veya Eksik Kasa)", k_list, index=idx_g)
+                    with c_k2:
+                        idx_a = k_list.index(sec_k['alan']) if sec_k.get('alan') in k_list else 0
+                        y_aln = st.selectbox("Alan Kasa (Veya Fazla Kasa)", k_list, index=idx_a)
+                        
+                    y_tutar = st.number_input("Tutar (₺)", min_value=0.0, value=float(sec_k['tutar']))
+                    
+                    c_gun, c_sil = st.columns(2)
+                    with c_gun:
+                        if st.form_submit_button("Güncelle"):
+                            if y_islem == "Virman":
+                                veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": y_gon, "alan": y_aln, "tutar": y_tutar}
+                            elif y_islem == "Eksik":
+                                veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": y_gon, "alan": None, "tutar": y_tutar}
+                            elif y_islem == "Fazla":
+                                veri = {"tarih": str(y_tarih), "islem_tipi": y_islem, "gonderen": None, "alan": y_aln, "tutar": y_tutar}
+                                
+                            if db_yaz(supabase.table("kasa_islemleri").update(veri).eq("id", sec_k['id'])):
+                                st.success("İşlem başarıyla güncellendi!")
+                                st.rerun()
+                    with c_sil:
+                        if st.form_submit_button("🗑️ Sil"):
+                            if db_yaz(supabase.table("kasa_islemleri").delete().eq("id", sec_k['id'])):
+                                st.warning("İşlem tamamen silindi!")
+                                st.rerun()
+        else:
+            st.info("Sistemde kayıtlı geçmiş virman veya sayım farkı bulunmuyor.")
+
+    st.divider()
+
     st.subheader("📊 Günün Kasa Özetleri")
     
     cirolar = db_oku(supabase.table("ciro").select("*").eq("tarih", str(secilen)))
@@ -713,5 +773,25 @@ elif menu == "Personel & Puantaj":
 
 elif menu == "Raporlar":
     st.header("Sistem Raporları")
-    # Mevcut rapor kodları... (Yer israfı olmaması adına raporlar aynı şekilde tutuldu)
-    st.write("Genel Raporlama Modülü")
+    # Raporlar aynı şekilde korundu.
+    st.subheader("Platform Satışları (Tümü)")
+    sat = db_oku(supabase.table("platform_satis").select("*"))
+    if sat: 
+        df_sat = pd.DataFrame(sat)
+        if 'komisyon_tutari' not in df_sat.columns: df_sat['komisyon_tutari'] = 0.0
+        if 'stopaj_tutari' not in df_sat.columns: df_sat['stopaj_tutari'] = 0.0
+        
+        df_sat = df_sat.sort_values(by="tarih", ascending=False)
+        st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'durum']])
+        dosya, uzanti, mime = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
+        st.download_button(label="📥 Platform Satışlarını Excel'e İndir", data=dosya, file_name=f"Platform_Satislar_Raporu.{uzanti}", mime=mime)
+    
+    st.divider()
+    st.subheader("Dükkan Cirosu")
+    cir = db_oku(supabase.table("ciro").select("*"))
+    if cir: 
+        df_cir = pd.DataFrame(cir)
+        df_cir = df_cir.sort_values(by="tarih", ascending=False)
+        st.dataframe(df_cir)
+        dosya2, uzanti2, mime2 = excel_indir(df_cir)
+        st.download_button(label="📥 Dükkan Cirosunu Excel'e İndir", data=dosya2, file_name=f"Dukkan_Cirosu_Raporu.{uzanti2}", mime=mime2)
