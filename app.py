@@ -67,6 +67,7 @@ menu = st.sidebar.radio("Menü", [
     "Trendyol Yönetimi", 
     "Masraf Girişi", 
     "Kasa Yönetimi (Virman)",
+    "Personel & Puantaj", # YENİ EKLENDİ
     "Raporlar"
 ])
 
@@ -464,6 +465,87 @@ elif menu == "Kasa Yönetimi (Virman)":
         st.success("### KASA 2 DURUMU")
         st.write(f"Açılış: {k2_a:,.2f} ₺\n\nNakit Giriş: + {k2_g:,.2f} ₺\n\nNakit Çıkış: - {k2_c:,.2f} ₺\n\nVirman Dengesi: {(k2_vg - k2_vgi):,.2f} ₺")
         st.metric("KASA 2'DE OLMASI GEREKEN", f"{k2_net:,.2f} ₺")
+
+# --- YENİ EKLENEN: PERSONEL & PUANTAJ MENÜSÜ ---
+elif menu == "Personel & Puantaj":
+    st.header("👥 Personel & Puantaj Yönetimi")
+    
+    tab1, tab2, tab3 = st.tabs(["📝 Puantaj (Mesai) Girişi", "📋 Geçmiş Puantaj Kayıtları", "⚙️ Personel Yönetimi"])
+    
+    with tab3:
+        st.subheader("Sisteme Yeni Personel Ekle")
+        with st.form("personel_ekle_form"):
+            yeni_personel = st.text_input("Personel Adı Soyadı")
+            if st.form_submit_button("Personel Ekle"):
+                if yeni_personel.strip():
+                    if db_yaz(supabase.table("personeller").insert({"isim": yeni_personel.strip()})):
+                        st.success(f"{yeni_personel} sisteme başarıyla eklendi!")
+                        st.rerun()
+                else:
+                    st.error("Lütfen geçerli bir isim girin.")
+        
+        st.divider()
+        st.subheader("Mevcut Personeller")
+        personel_listesi = db_oku(supabase.table("personeller").select("*"))
+        if personel_listesi:
+            for p in personel_listesi:
+                st.write(f"- {p['isim']}")
+        else:
+            st.info("Sistemde henüz kayıtlı personel bulunmuyor.")
+
+    with tab1:
+        st.subheader("Günlük Puantaj ve Mesai Girişi")
+        personel_listesi = db_oku(supabase.table("personeller").select("*"))
+        
+        if personel_listesi:
+            personel_isimleri = [p['isim'] for p in personel_listesi]
+            with st.form("puantaj_form"):
+                p_tarih = st.date_input("Tarih", datetime.date.today())
+                p_isim = st.selectbox("Personel Seçin", personel_isimleri)
+                p_durum = st.selectbox("Günlük Durum", ["Tam Gün", "Yarım Gün", "İzinli", "Raporlu", "Gelmedi"])
+                p_mesai = st.number_input("Fazla Mesai Saati (Varsa)", min_value=0.0, step=0.5, help="Sadece o gün yapılan ekstra mesai saati")
+                
+                if st.form_submit_button("Puantajı Kaydet"):
+                    veri = {
+                        "tarih": str(p_tarih),
+                        "personel_adi": p_isim,
+                        "durum": p_durum,
+                        "fazla_mesai_saati": p_mesai
+                    }
+                    if db_yaz(supabase.table("puantaj").insert(veri)):
+                        st.success(f"{p_isim} için puantaj başarıyla kaydedildi!")
+        else:
+            st.warning("Lütfen önce 'Personel Yönetimi' sekmesinden sisteme personel ekleyin.")
+
+    with tab2:
+        st.subheader("Geçmiş Puantaj Kayıtları")
+        puantajlar = db_oku(supabase.table("puantaj").select("*").order("tarih", desc=True))
+        
+        if puantajlar:
+            df_puantaj = pd.DataFrame(puantajlar)
+            
+            # Filtreleme
+            with st.expander("🔍 Kayıtları Filtrele", expanded=False):
+                aranan_isim = st.text_input("Personel İsmi Ara")
+            if aranan_isim:
+                df_puantaj = df_puantaj[df_puantaj['personel_adi'].str.contains(aranan_isim, case=False, na=False)]
+            
+            st.dataframe(
+                df_puantaj[['tarih', 'personel_adi', 'durum', 'fazla_mesai_saati']],
+                column_config={
+                    "tarih": "Tarih",
+                    "personel_adi": "Personel",
+                    "durum": "Çalışma Durumu",
+                    "fazla_mesai_saati": st.column_config.NumberColumn("Fazla Mesai (Saat)", format="%.1f")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            dosya_p, uzanti_p, mime_p = excel_indir(df_puantaj[['tarih', 'personel_adi', 'durum', 'fazla_mesai_saati']])
+            st.download_button(label="📥 Puantajları Excel'e İndir", data=dosya_p, file_name=f"Puantaj_Raporu.{uzanti_p}", mime=mime_p)
+        else:
+            st.info("Sistemde henüz puantaj kaydı bulunmuyor.")
 
 elif menu == "Raporlar":
     st.header("Sistem Raporları")
