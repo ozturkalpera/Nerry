@@ -15,12 +15,10 @@ supabase: Client = create_client(url, key)
 def excel_indir(df):
     output = io.BytesIO()
     try:
-        # Gerçek .xlsx formatında kaydet
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Veriler')
         return output.getvalue(), "xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     except ModuleNotFoundError:
-        # Eğer requirements.txt'ye openpyxl eklemeyi unutursan sistem çökmesin diye CSV'ye çevirir
         return df.to_csv(index=False).encode('utf-8-sig'), "csv", "text/csv"
 
 # --- GÜVENLİ VERİTABANI FONKSİYONLARI ---
@@ -98,7 +96,13 @@ def platform_sayfasi(platform_adi):
                             komisyon_tutari = tutar * (float(ayar['komisyon']) / 100)
                             stopaj_tutari = tutar * (float(ayar['stopaj']) / 100)
                             kesinti = komisyon_tutari + stopaj_tutari
-                            net = tutar - kesinti
+                            
+                            # YENİ MUHASEBE MANTIĞI:
+                            if o_tip == "Online":
+                                net = tutar - kesinti  # Normal alacak
+                            else: # Kapıda Ödeme
+                                net = -kesinti  # Tutar zaten kasaya girdi, sadece komisyonu içerideki hakedişten düşüyoruz
+                                
                             tahsilat_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
                             
                             veri = {
@@ -111,6 +115,7 @@ def platform_sayfasi(platform_adi):
                             st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
                             return
                 st.success("Satışlar başarıyla kaydedildi!")
+                st.info("💡 Not: Kapıda ödemelerin brüt tutarı fiziksel kasaya girdiği varsayıldığı için tahsilat tablosunda sadece 'eksi (-) komisyon gideri' olarak yansıtılmıştır.")
 
     with tab2:
         st.subheader("Bankaya Yatması Beklenen Paralar")
@@ -141,7 +146,6 @@ def platform_sayfasi(platform_adi):
                 key=f"{platform_adi}_editor"
             )
             
-            # EXCEL BUTONU (TAHSİLAT TAKİBİ İÇİN)
             dosya, uzanti, mime = excel_indir(df[['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']])
             st.download_button(label=f"📥 Bekleyenleri Excel'e İndir", data=dosya, file_name=f"{platform_adi}_Bekleyenler.{uzanti}", mime=mime)
             
@@ -223,8 +227,6 @@ elif menu == "Masraf Girişi":
         tarih = st.date_input("Tarih", datetime.date.today())
         aciklama = st.text_input("Açıklama")
         tutar = st.number_input("Tutar (₺)", min_value=0.0)
-        
-        # YENİ BANKA VE KASA SEÇENEKLERİ EKLENDİ
         odeme_y = st.selectbox("Nereden Ödendi?", [
             "Nakit - Kasa 1", 
             "Nakit - Kasa 2", 
@@ -232,7 +234,6 @@ elif menu == "Masraf Girişi":
             "İşbank Kk", 
             "Havale / Diğer Kartlar"
         ])
-        
         if st.form_submit_button("Masrafı Kaydet"):
             veri = {"tarih": str(tarih), "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme_y}
             if db_yaz(supabase.table("masraf").insert(veri)):
@@ -307,9 +308,7 @@ elif menu == "Raporlar":
         df_sat = pd.DataFrame(sat)
         if 'komisyon_tutari' not in df_sat.columns: df_sat['komisyon_tutari'] = 0.0
         if 'stopaj_tutari' not in df_sat.columns: df_sat['stopaj_tutari'] = 0.0
-        # Tabloyu göster
         st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'durum']])
-        # EXCEL BUTONU
         dosya, uzanti, mime = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
         st.download_button(label="📥 Platform Satışlarını Excel'e İndir", data=dosya, file_name=f"Platform_Satislar_Raporu.{uzanti}", mime=mime)
     
@@ -319,8 +318,6 @@ elif menu == "Raporlar":
     cir = db_oku(supabase.table("ciro").select("*"))
     if cir: 
         df_cir = pd.DataFrame(cir)
-        # Tabloyu Göster
         st.dataframe(df_cir)
-        # EXCEL BUTONU
         dosya2, uzanti2, mime2 = excel_indir(df_cir)
         st.download_button(label="📥 Dükkan Cirosunu Excel'e İndir", data=dosya2, file_name=f"Dukkan_Cirosu_Raporu.{uzanti2}", mime=mime2)
