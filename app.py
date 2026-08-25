@@ -27,21 +27,30 @@ def db_yaz(sorgu):
         st.error(f"⚠️ İşlem Başarısız Oldu. Hata Detayı: {e}")
         return False
 
-# --- GİRİŞ EKRANI ---
+# --- GİRİŞ EKRANI (GÜNCELLENDİ) ---
 if 'giris_yapildi' not in st.session_state:
     st.session_state.giris_yapildi = False
 
 if not st.session_state.giris_yapildi:
     st.title("☕ Cafe Yönetim Sistemi - Giriş")
-    kullanici = st.text_input("Kullanıcı Adı")
-    sifre = st.text_input("Şifre", type="password")
-    if st.button("Giriş Yap"):
-        if (kullanici == "admin" and sifre == "admin123") or (kullanici == "user" and sifre == "user123"):
-            st.session_state.giris_yapildi = True
-            st.session_state.rol = kullanici
-            st.rerun()
-        else:
-            st.error("Hatalı Giriş!")
+    
+    # Enter tuşuyla çalışması için form içine alındı
+    with st.form("login_form"):
+        kullanici = st.text_input("Kullanıcı Adı")
+        sifre = st.text_input("Şifre", type="password")
+        submit_btn = st.form_submit_button("Giriş Yap")
+        
+        if submit_btn:
+            # Boşlukları sil ve otomatik küçük harfe çevir (Klavye hatalarını önler)
+            k = kullanici.strip().lower()
+            s = sifre.strip()
+            
+            if (k == "admin" and s == "admin123") or (k == "user" and s == "user123"):
+                st.session_state.giris_yapildi = True
+                st.session_state.rol = "admin" if k == "admin" else "user"
+                st.rerun()
+            else:
+                st.error("Hatalı Giriş! Şifrenizi kontrol edin.")
     st.stop() 
 
 # --- SOL MENÜ ---
@@ -95,40 +104,34 @@ def platform_sayfasi(platform_adi):
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
             
-            # --- YENİ EKLENEN TOPLU SEÇİM ÖZELLİĞİ ---
-            # Seçim yapabilmen için tabloya "Seç" adında bir tik kutusu sütunu ekliyoruz
             df.insert(0, "Seç", False)
             st.info("💡 **İpucu:** Hesabınıza yatan ödemeleri soldaki kutucuklardan işaretleyin. Seçtiklerinizin toplamı aşağıda otomatik hesaplanacaktır.")
             
-            # Tabloyu düzenlenebilir (tiklenebilir) olarak ekrana bas
             edited_df = st.data_editor(
                 df[['Seç', 'id', 'tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi']],
                 column_config={
                     "Seç": st.column_config.CheckboxColumn("Tik (Seç)", default=False),
-                    "id": None, # ID sütununu gizliyoruz ki kafa karıştırmasın
+                    "id": None, 
                     "tarih": "Satış Tarihi",
                     "odeme_tipi": "Ödeme Tipi",
                     "net": st.column_config.NumberColumn("Net Tutar (₺)", format="%.2f ₺"),
                     "tahsilat_tarihi": "Beklenen Ödeme Tarihi"
                 },
-                disabled=['tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi'], # Sadece "Seç" kutusu tıklanabilsin
+                disabled=['tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi'],
                 hide_index=True,
                 use_container_width=True,
                 key=f"{platform_adi}_editor"
             )
             
-            # Seçilenleri hesapla
             secilenler = edited_df[edited_df["Seç"] == True]
             secilen_toplam = secilenler["net"].sum()
             
-            # Toplam Durumlarını Göster
             col1, col2 = st.columns(2)
             with col1:
                 st.write(f"Tüm Bekleyenlerin Toplamı: **{df['net'].sum():,.2f} ₺**")
             with col2:
                 st.success(f"✔️ Seçtiklerinin Toplamı: **{secilen_toplam:,.2f} ₺**")
             
-            # Toplu Ödeme Butonu
             if st.button("✅ Seçili Olanları 'ÖDENDİ' Olarak İşaretle", key=f"{platform_adi}_odeme_btn"):
                 if not secilenler.empty:
                     for idx in secilenler["id"]:
