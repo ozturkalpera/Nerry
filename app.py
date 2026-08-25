@@ -16,7 +16,7 @@ def db_oku(sorgu):
         sonuc = sorgu.execute()
         return sonuc.data if sonuc.data else []
     except Exception as e:
-        st.error(f"⚠️ Veri Okuma Hatası (Lütfen bu hatayı bana ilet): {e}")
+        st.error(f"⚠️ Veri Okuma Hatası: {e}")
         return []
 
 def db_yaz(sorgu):
@@ -66,11 +66,11 @@ def platform_sayfasi(platform_adi):
     
     with tab1:
         st.subheader("Satışları Gir")
-        with st.form(f"{platform_adi}_form"):
+        with st.form(f"{platform_adi}_satis_form"):
             tarih = st.date_input("Satış Tarihi", datetime.date.today())
             col1, col2 = st.columns(2)
-            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0)
-            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0)
+            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_satis_online")
+            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_satis_kapida")
             
             if st.form_submit_button("Satışları Kaydet"):
                 for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
@@ -97,7 +97,7 @@ def platform_sayfasi(platform_adi):
             st.dataframe(df[['tarih', 'odeme_tipi', 'net', 'tahsilat_tarihi']], use_container_width=True)
             with st.form(f"{platform_adi}_tahsilat_form"):
                 secenekler = [f"{b['id']} - {b['odeme_tipi']} | Net: {b['net']} ₺" for b in bekleyenler]
-                secim = st.selectbox("Hesaba Yatan Ödemeyi Seçin", secenekler)
+                secim = st.selectbox("Hesaba Yatan Ödemeyi Seçin", secenekler, key=f"{platform_adi}_tahsilat_secim")
                 if st.form_submit_button("Tahsil Edildi (Yattı) Olarak İşaretle"):
                     secili_id = int(secim.split(" - ")[0])
                     if db_yaz(supabase.table("platform_satis").update({"durum": "Tahsil Edildi"}).eq("id", secili_id)):
@@ -119,14 +119,16 @@ def platform_sayfasi(platform_adi):
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("### 🌐 Online Ödeme")
-                y_o_kom = st.number_input("Komisyon (%)", value=float(o_kom))
-                y_o_stop = st.number_input("Stopaj (%)", value=float(o_stop))
-                y_o_vade = st.number_input("Vade (Gün)", value=int(o_vade), step=1)
+                # KEY EKLENEREK HATA ÇÖZÜLDÜ
+                y_o_kom = st.number_input("Komisyon (%)", value=float(o_kom), key=f"{platform_adi}_o_kom")
+                y_o_stop = st.number_input("Stopaj (%)", value=float(o_stop), key=f"{platform_adi}_o_stop")
+                y_o_vade = st.number_input("Vade (Gün)", value=int(o_vade), step=1, key=f"{platform_adi}_o_vade")
             with c2:
                 st.markdown("### 🛵 Kapıda Ödeme")
-                y_k_kom = st.number_input("Komisyon (%)", value=float(k_kom))
-                y_k_stop = st.number_input("Stopaj (%)", value=float(k_stop))
-                y_k_vade = st.number_input("Vade (Gün)", value=int(k_vade), step=1)
+                # KEY EKLENEREK HATA ÇÖZÜLDÜ
+                y_k_kom = st.number_input("Komisyon (%)", value=float(k_kom), key=f"{platform_adi}_k_kom")
+                y_k_stop = st.number_input("Stopaj (%)", value=float(k_stop), key=f"{platform_adi}_k_stop")
+                y_k_vade = st.number_input("Vade (Gün)", value=int(k_vade), step=1, key=f"{platform_adi}_k_vade")
             
             if st.form_submit_button("Ayarları Güncelle"):
                 db_yaz(supabase.table("ayarlar").delete().eq("platform", platform_adi))
