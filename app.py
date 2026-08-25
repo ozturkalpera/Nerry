@@ -38,6 +38,111 @@ def db_yaz(sorgu):
         st.error(f"⚠️ İşlem Başarısız Oldu. Hata Detayı: {e}")
         return False
 
+# --- CALLBACK (ARKA PLAN) FONKSİYONLARI ---
+def platform_kaydet_cb(plat_adi):
+    tarih = st.session_state[f"{plat_adi}_tarih"]
+    online = st.session_state[f"{plat_adi}_on"]
+    kapida = st.session_state[f"{plat_adi}_kap"]
+    
+    if online <= 0 and kapida <= 0:
+        st.session_state[f"{plat_adi}_msg"] = ("warning", "Lütfen en az bir tutar girin.")
+        return
+
+    # ÇİFT KAYIT KONTROLÜ
+    mevcut = db_oku(supabase.table("platform_satis").select("id").eq("platform", plat_adi).eq("tarih", str(tarih)))
+    if mevcut:
+        st.session_state[f"{plat_adi}_msg"] = ("error", f"⚠️ {tarih} tarihi için {plat_adi} satışı zaten girilmiş! Değiştirmek için aşağıdaki Düzenle panelini kullanın.")
+        return
+
+    hata = False
+    for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
+        if tutar > 0:
+            ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", plat_adi).eq("odeme_tipi", o_tip))
+            if len(ayar_getir) > 0:
+                ayar = ayar_getir[0]
+                k_tutari = tutar * (float(ayar['komisyon']) / 100)
+                s_tutari = (tutar / 1.10) * (float(ayar['stopaj']) / 100)
+                kes = k_tutari + s_tutari
+                net_t = tutar - kes if o_tip == "Online" else -kes
+                t_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
+                
+                veri = {
+                    "tarih": str(tarih), "platform": plat_adi, "odeme_tipi": o_tip, 
+                    "brut": tutar, "komisyon_tutari": k_tutari, "stopaj_tutari": s_tutari, 
+                    "kesinti": kes, "net": net_t, "tahsilat_tarihi": str(t_tarihi), "durum": "Bekliyor"
+                }
+                if not db_yaz(supabase.table("platform_satis").insert(veri)):
+                    hata = True
+            else:
+                st.session_state[f"{plat_adi}_msg"] = ("error", f"⚠️ Lütfen önce Ayarlar'dan '{o_tip}' için oranları kaydedin!")
+                return
+    if not hata:
+        st.session_state[f"{plat_adi}_msg"] = ("success", f"{plat_adi} satışları başarıyla kaydedildi!")
+        # EKRANI TEMİZLE (Sıfırla)
+        st.session_state[f"{plat_adi}_on"] = 0.0
+        st.session_state[f"{plat_adi}_kap"] = 0.0
+
+def ciro_kaydet_cb():
+    tarih = st.session_state["ciro_tarih"]
+    kasa = st.session_state["ciro_kasa"]
+    nakit = st.session_state["ciro_nakit"]
+    kredi = st.session_state["ciro_kredi"]
+    pavo_n = st.session_state["ciro_pavo_n"]
+    pavo_k = st.session_state["ciro_pavo_k"]
+    odenmez = st.session_state["ciro_odenmez"]
+    
+    # ÇİFT KAYIT KONTROLÜ
+    mevcut = db_oku(supabase.table("ciro").select("id").eq("tarih", str(tarih)))
+    if mevcut:
+        st.session_state["ciro_msg"] = ("error", f"⚠️ {tarih} tarihi için Dükkan Cirosu zaten girilmiş! Düzenlemek için aşağıdaki paneli kullanın.")
+        return
+        
+    veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
+    if db_yaz(supabase.table("ciro").insert(veri)):
+        st.session_state["ciro_msg"] = ("success", "Dükkan Cirosu başarıyla kaydedildi!")
+        # EKRANI TEMİZLE
+        st.session_state["ciro_nakit"] = 0.0
+        st.session_state["ciro_kredi"] = 0.0
+        st.session_state["ciro_pavo_n"] = 0.0
+        st.session_state["ciro_pavo_k"] = 0.0
+        st.session_state["ciro_odenmez"] = 0.0
+
+def puantaj_kaydet_cb():
+    tarih = st.session_state["puantaj_tarih"]
+    isim = st.session_state["puantaj_isim"]
+    durum = st.session_state["puantaj_durum"]
+    mesai = st.session_state["puantaj_mesai"]
+    
+    # ÇİFT KAYIT KONTROLÜ (O personel için o gün girilmiş mi?)
+    mevcut = db_oku(supabase.table("puantaj").select("id").eq("personel_adi", isim).eq("tarih", str(tarih)))
+    if mevcut:
+        st.session_state["puantaj_msg"] = ("error", f"⚠️ {tarih} tarihinde {isim} adlı personel için zaten giriş yapılmış!")
+        return
+        
+    veri = {"tarih": str(tarih), "personel_adi": isim, "durum": durum, "fazla_mesai_saati": mesai}
+    if db_yaz(supabase.table("puantaj").insert(veri)):
+        st.session_state["puantaj_msg"] = ("success", f"{isim} için puantaj kaydedildi!")
+        # EKRANI TEMİZLE
+        st.session_state["puantaj_mesai"] = 0.0
+        st.session_state["puantaj_durum"] = "Tam Gün"
+
+def masraf_kaydet_cb():
+    tarih = st.session_state["masraf_tarih"]
+    aciklama = st.session_state["masraf_aciklama"]
+    tutar = st.session_state["masraf_tutar"]
+    odeme = st.session_state["masraf_odeme"]
+    
+    if not aciklama or tutar <= 0:
+        st.session_state["masraf_msg"] = ("warning", "Lütfen açıklama ve tutar girin.")
+        return
+        
+    veri = {"tarih": str(tarih), "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme}
+    if db_yaz(supabase.table("masraf").insert(veri)):
+        st.session_state["masraf_msg"] = ("success", "Masraf kaydedildi!")
+        # EKRANI TEMİZLE
+        st.session_state["masraf_aciklama"] = ""
+        st.session_state["masraf_tutar"] = 0.0
+
 # --- GİRİŞ EKRANI ---
 if 'giris_yapildi' not in st.session_state:
     st.session_state.giris_yapildi = False
@@ -82,45 +187,25 @@ def platform_sayfasi(platform_adi):
     
     with tab1:
         st.subheader("Satışları Gir")
-        with st.form(f"{platform_adi}_satis_form"):
-            tarih = st.date_input("Satış Tarihi", datetime.date.today())
-            col1, col2 = st.columns(2)
-            with col1: online = st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_satis_online")
-            with col2: kapida = st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_satis_kapida")
+        
+        # Ekran Çökertmeyen Güvenli Mesaj ve Giriş Sistemi
+        if f"{platform_adi}_msg" in st.session_state:
+            m_type, m_text = st.session_state[f"{platform_adi}_msg"]
+            if m_type == "success": st.success(m_text)
+            elif m_type == "error": st.error(m_text)
+            elif m_type == "warning": st.warning(m_text)
+            del st.session_state[f"{platform_adi}_msg"]
             
-            if st.form_submit_button("Satışları Kaydet"):
-                for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
-                    if tutar > 0:
-                        ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", o_tip))
-                        if len(ayar_getir) > 0:
-                            ayar = ayar_getir[0]
-                            
-                            komisyon_tutari = tutar * (float(ayar['komisyon']) / 100)
-                            kdv_haric_tutar = tutar / 1.10
-                            stopaj_tutari = kdv_haric_tutar * (float(ayar['stopaj']) / 100)
-                            kesinti = komisyon_tutari + stopaj_tutari
-                            
-                            if o_tip == "Online":
-                                net = tutar - kesinti  
-                            else:
-                                net = -kesinti  
-                                
-                            tahsilat_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
-                            
-                            veri = {
-                                "tarih": str(tarih), "platform": platform_adi, "odeme_tipi": o_tip, 
-                                "brut": tutar, "komisyon_tutari": komisyon_tutari, "stopaj_tutari": stopaj_tutari, 
-                                "kesinti": kesinti, "net": net, "tahsilat_tarihi": str(tahsilat_tarihi), "durum": "Bekliyor"
-                            }
-                            db_yaz(supabase.table("platform_satis").insert(veri))
-                        else:
-                            st.error(f"Lütfen önce Ayarlar sekmesinden '{o_tip}' için oranları kaydedin!")
-                            return
-                st.success("Satışlar başarıyla kaydedildi!")
+        st.date_input("Satış Tarihi", datetime.date.today(), key=f"{platform_adi}_tarih")
+        col1, col2 = st.columns(2)
+        with col1: st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_on")
+        with col2: st.number_input("Kapıda Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_kap")
+        
+        # St.form kullanılmadı, callback ile tetikleniyor! Sayfa çökmeyecek!
+        st.button("Satışları Kaydet", on_click=platform_kaydet_cb, args=(platform_adi,), type="primary")
 
         st.divider()
         
-        # --- YENİ: PLATFORM SATIŞLARI İÇİN DÜZENLE / SİL BÖLÜMÜ ---
         with st.expander(f"✏️ {platform_adi} Kaydını Düzenle veya Sil", expanded=False):
             st.info("Aşağıdan geçmiş bir satışı seçip güncelleyebilir veya silebilirsiniz.")
             satislar_db = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).order("tarih", desc=True))
@@ -145,19 +230,13 @@ def platform_sayfasi(platform_adi):
                         c_gun, c_sil = st.columns(2)
                         with c_gun:
                             if st.form_submit_button("Satışı Güncelle"):
-                                # Brüt değişmiş olabileceği için komisyonları baştan hesaplıyoruz
                                 ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", y_ps_odeme))
                                 if len(ayar_getir) > 0:
                                     ayar = ayar_getir[0]
                                     k_tutari = y_ps_brut * (float(ayar['komisyon']) / 100)
                                     s_tutari = (y_ps_brut / 1.10) * (float(ayar['stopaj']) / 100)
                                     kes = k_tutari + s_tutari
-                                    
-                                    if y_ps_odeme == "Online":
-                                        net_t = y_ps_brut - kes
-                                    else:
-                                        net_t = -kes
-                                        
+                                    net_t = y_ps_brut - kes if y_ps_odeme == "Online" else -kes
                                     t_tarihi = y_ps_tarih + datetime.timedelta(days=int(ayar['vade']))
                                     
                                     guncel_veri = {
@@ -166,14 +245,14 @@ def platform_sayfasi(platform_adi):
                                         "net": net_t, "tahsilat_tarihi": str(t_tarihi)
                                     }
                                     if db_yaz(supabase.table("platform_satis").update(guncel_veri).eq("id", secilen_ps['id'])):
-                                        st.success("Kayıt başarıyla güncellendi!")
+                                        st.success("Kayıt güncellendi!")
                                         st.rerun()
                                 else:
                                     st.error("Önce ayarları yapın.")
                         with c_sil:
                             if st.form_submit_button("🗑️ Bu Kaydı SİL"):
                                 if db_yaz(supabase.table("platform_satis").delete().eq("id", secilen_ps['id'])):
-                                    st.warning("Kayıt sistemden silindi!")
+                                    st.warning("Kayıt silindi!")
                                     st.rerun()
             else:
                 st.write("Sistemde henüz kayıt bulunmuyor.")
@@ -253,7 +332,6 @@ def platform_sayfasi(platform_adi):
         else:
             st.info("Henüz tahsil edilmiş (Ödendi olarak işaretlenmiş) bir kayıt bulunmuyor.")
 
-
     with tab3:
         st.subheader("Komisyon ve Kesinti Oranlarını Öğret")
         ayarlar = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi))
@@ -288,22 +366,24 @@ def platform_sayfasi(platform_adi):
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     
-    with st.form("ciro_form"):
-        c1, c2 = st.columns(2)
-        with c1:
-            tarih = st.date_input("Tarih", datetime.date.today())
-            kasa = st.selectbox("Hedef Kasa", ["Kasa 1", "Kasa 2"])
-            nakit = st.number_input("Nakit (₺)", min_value=0.0)
-            kredi = st.number_input("Kredi Kartı (₺)", min_value=0.0)
-        with c2:
-            pavo_n = st.number_input("Pavo Nakit (₺)", min_value=0.0)
-            pavo_k = st.number_input("Pavo Kredi (₺)", min_value=0.0)
-            odenmez = st.number_input("Ödenmez (₺)", min_value=0.0)
+    if "ciro_msg" in st.session_state:
+        m_type, m_text = st.session_state["ciro_msg"]
+        if m_type == "success": st.success(m_text)
+        elif m_type == "error": st.error(m_text)
+        del st.session_state["ciro_msg"]
         
-        if st.form_submit_button("Ciro Kaydet"):
-            veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
-            if db_yaz(supabase.table("ciro").insert(veri)):
-                st.success("Dükkan Cirosu Kaydedildi!")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.date_input("Tarih", datetime.date.today(), key="ciro_tarih")
+        st.selectbox("Hedef Kasa", ["Kasa 1", "Kasa 2"], key="ciro_kasa")
+        st.number_input("Nakit (₺)", min_value=0.0, key="ciro_nakit")
+        st.number_input("Kredi Kartı (₺)", min_value=0.0, key="ciro_kredi")
+    with c2:
+        st.number_input("Pavo Nakit (₺)", min_value=0.0, key="ciro_pavo_n")
+        st.number_input("Pavo Kredi (₺)", min_value=0.0, key="ciro_pavo_k")
+        st.number_input("Ödenmez (₺)", min_value=0.0, key="ciro_odenmez")
+        
+    st.button("Ciro Kaydet", on_click=ciro_kaydet_cb, type="primary")
 
     st.divider()
 
@@ -395,21 +475,18 @@ elif menu == "Trendyol Yönetimi":
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
     
-    with st.form("masraf_form"):
-        tarih = st.date_input("Tarih", datetime.date.today())
-        aciklama = st.text_input("Açıklama")
-        tutar = st.number_input("Tutar (₺)", min_value=0.0)
-        odeme_y = st.selectbox("Nereden Ödendi?", [
-            "Nakit - Kasa 1", 
-            "Nakit - Kasa 2", 
-            "Halkbank Kk", 
-            "İşbank Kk", 
-            "Havale / Diğer Kartlar"
-        ])
-        if st.form_submit_button("Masrafı Kaydet"):
-            veri = {"tarih": str(tarih), "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme_y}
-            if db_yaz(supabase.table("masraf").insert(veri)):
-                st.success("Masraf Kaydedildi!")
+    if "masraf_msg" in st.session_state:
+        m_type, m_text = st.session_state["masraf_msg"]
+        if m_type == "success": st.success(m_text)
+        elif m_type == "warning": st.warning(m_text)
+        del st.session_state["masraf_msg"]
+        
+    st.date_input("Tarih", datetime.date.today(), key="masraf_tarih")
+    st.text_input("Açıklama", key="masraf_aciklama")
+    st.number_input("Tutar (₺)", min_value=0.0, key="masraf_tutar")
+    st.selectbox("Nereden Ödendi?", ["Nakit - Kasa 1", "Nakit - Kasa 2", "Halkbank Kk", "İşbank Kk", "Havale / Diğer Kartlar"], key="masraf_odeme")
+    
+    st.button("Masrafı Kaydet", on_click=masraf_kaydet_cb, type="primary")
 
     st.divider()
     
@@ -619,7 +696,6 @@ elif menu == "Personel & Puantaj":
         
         st.divider()
         
-        # --- YENİ: PERSONEL İSMİ DÜZENLE / SİL BÖLÜMÜ ---
         with st.expander("✏️ Personel İsmini Düzenle veya Sil", expanded=False):
             personel_listesi = db_oku(supabase.table("personeller").select("*"))
             if personel_listesi:
@@ -634,7 +710,6 @@ elif menu == "Personel & Puantaj":
                         with c1:
                             if st.form_submit_button("İsmi Güncelle"):
                                 if db_yaz(supabase.table("personeller").update({"isim": y_isim}).eq("id", sec_pers['id'])):
-                                    # Eski isme ait puantajları da güncelleyelim ki geçmiş kayıtlar bozulmasın
                                     db_yaz(supabase.table("puantaj").update({"personel_adi": y_isim}).eq("personel_adi", sec_pers['isim']))
                                     st.success("Personel güncellendi!")
                                     st.rerun()
@@ -652,25 +727,22 @@ elif menu == "Personel & Puantaj":
         
         if personel_listesi:
             personel_isimleri = [p['isim'] for p in personel_listesi]
-            with st.form("puantaj_form"):
-                p_tarih = st.date_input("Tarih", datetime.date.today())
-                p_isim = st.selectbox("Personel Seçin", personel_isimleri)
-                p_durum = st.selectbox("Günlük Durum", ["Tam Gün", "Yarım Gün", "İzinli", "Raporlu", "Gelmedi"])
-                p_mesai = st.number_input("Fazla Mesai Saati (Varsa)", min_value=0.0, step=0.5, help="Sadece o gün yapılan ekstra mesai saati")
+            
+            if "puantaj_msg" in st.session_state:
+                m_type, m_text = st.session_state["puantaj_msg"]
+                if m_type == "success": st.success(m_text)
+                elif m_type == "error": st.error(m_text)
+                del st.session_state["puantaj_msg"]
                 
-                if st.form_submit_button("Puantajı Kaydet"):
-                    veri = {
-                        "tarih": str(p_tarih),
-                        "personel_adi": p_isim,
-                        "durum": p_durum,
-                        "fazla_mesai_saati": p_mesai
-                    }
-                    if db_yaz(supabase.table("puantaj").insert(veri)):
-                        st.success(f"{p_isim} için puantaj başarıyla kaydedildi!")
+            st.date_input("Tarih", datetime.date.today(), key="puantaj_tarih")
+            st.selectbox("Personel Seçin", personel_isimleri, key="puantaj_isim")
+            st.selectbox("Günlük Durum", ["Tam Gün", "Yarım Gün", "İzinli", "Raporlu", "Gelmedi"], key="puantaj_durum")
+            st.number_input("Fazla Mesai Saati (Varsa)", min_value=0.0, step=0.5, key="puantaj_mesai")
+            
+            st.button("Puantajı Kaydet", on_click=puantaj_kaydet_cb, type="primary")
                         
             st.divider()
             
-            # --- YENİ: PUANTAJ DÜZENLE / SİL BÖLÜMÜ ---
             with st.expander("✏️ Puantaj Kaydını Düzenle veya Sil", expanded=False):
                 tum_puantaj = db_oku(supabase.table("puantaj").select("*").order("tarih", desc=True))
                 if tum_puantaj:
