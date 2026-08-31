@@ -55,8 +55,6 @@ def platform_kaydet_cb(plat_adi):
         return
 
     hata = False
-    for o_tip, tutar in [("Online", Kapıda Ödeme)]: # Sabit mantık döngüsü
-        pass
     for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
         if tutar > 0:
             ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", plat_adi).eq("odeme_tipi", o_tip))
@@ -983,11 +981,9 @@ elif menu == "Personel & Puantaj":
                         # --- TÜRKİYE BORDRO STANDARDI (30 GÜN KURALI) ---
                         _, aydaki_gun_sayisi = calendar.monthrange(secilen_yil, ay_index)
                         
-                        # Eğer Şubat ayında tam çalışıldıysa 30'a tamamla
+                        # Eğer ay sonunda tam çalışıldıysa 30'a sabitle
                         if aydaki_gun_sayisi in [28, 29] and odenecek_gun == aydaki_gun_sayisi:
                             odenecek_gun = 30
-                            
-                        # Ağustos gibi 31 çeken aylarda 31 gün çalışılsa bile maaşı 30 gün üzerinden ver (Fazla hesabı engelle)
                         if odenecek_gun > 30:
                             odenecek_gun = 30
                             
