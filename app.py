@@ -303,11 +303,41 @@ def platform_sayfasi(platform_adi):
             with col1: st.write(f"Tüm Bekleyenlerin Toplamı: **{df['net'].sum():,.2f} ₺**")
             with col2: st.success(f"✔️ Seçtiklerinin Toplamı: **{secilenler['net'].sum():,.2f} ₺**")
             
-            if st.button("✅ Seçili Olanları 'ÖDENDİ' İşaretle"):
-                if not secilenler.empty:
-                    for idx in secilenler["id"]: db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
-                    st.rerun()
-                else: st.warning("Lütfen listeden en az bir tane satış seçin.")
+            # --- BANKA VE TARİH SEÇİMLİ TAHSİLAT AKTARIMI ---
+            if not secilenler.empty:
+                st.markdown("---")
+                st.subheader("💳 Tahsilat ve Banka Aktarımı")
+                bankalar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
+                banka_isimleri = [b['isim'] for b in bankalar_db] if bankalar_db else []
+                
+                if not banka_isimleri:
+                    st.warning("⚠️ Tahsilatı bankaya işleyebilmek için lütfen önce 'Banka & Kart Yönetimi' sayfasından en az bir banka hesabı ekleyin.")
+                else:
+                    c_t1, c_t2 = st.columns(2)
+                    with c_t1:
+                        tahsilat_tarihi = st.date_input("Paranın Bankaya Yattığı Tarih", datetime.date.today(), key=f"{platform_adi}_tah_tar")
+                    with c_t2:
+                        secilen_banka = st.selectbox("Paranın Yattığı Banka Hesabı", banka_isimleri, key=f"{platform_adi}_tah_bnk")
+                    
+                    toplam_net = float(secilenler['net'].sum())
+                    if st.button(f"✅ Seçili {len(secilenler)} Satışı 'ÖDENDİ' Yap ve {secilen_banka} Hesabına Aktar ({toplam_net:,.2f} ₺)", type="primary", key=f"{platform_adi}_odeme_btn"):
+                        for idx in secilenler["id"]:
+                            db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
+                        
+                        if toplam_net > 0:
+                            b_veri = {
+                                "tarih": str(tahsilat_tarihi),
+                                "hesap_adi": secilen_banka,
+                                "islem_tipi": "Para Girişi",
+                                "tutar": toplam_net,
+                                "aciklama": f"{platform_adi} Tahsilatı ({len(secilenler)} Adet Satış)"
+                            }
+                            db_yaz(supabase.table("banka_islemleri").insert(b_veri))
+                        
+                        st.success(f"Tahsilat başarıyla tamamlandı ve {secilen_banka} hesabına {toplam_net:,.2f} ₺ para girişi yapıldı!")
+                        st.rerun()
+            else:
+                st.info("💡 Yukarıdaki tablodan bankaya yatan satışları seçin.")
         else:
             st.success("Bekleyen alacağınız bulunmuyor.")
 
@@ -511,8 +541,6 @@ elif menu == "Banka & Kart Yönetimi":
         
         with alt_tab2:
             st.write("Açıklama içinde geçen kelimeleri sisteme öğreterek otomatik eşleştirme yapabilirsiniz.")
-            
-            # Seçenekleri çek
             tipler_db = db_oku(supabase.table("masraf_tipleri").select("*"))
             masraf_tipleri = [t['tip_adi'] for t in tipler_db] if tipler_db else ["Genel Masraf"]
             cariler_db = db_oku(supabase.table("cariler").select("*"))
@@ -591,7 +619,6 @@ elif menu == "Banka & Kart Yönetimi":
                                         continue
                                         
                                     h_def = ""
-                                    # KURAL KONTROLÜ
                                     if kurallar_db:
                                         for kr in kurallar_db:
                                             if str(kr['kelime']).lower() in ack_val.lower():
