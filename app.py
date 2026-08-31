@@ -114,6 +114,18 @@ def puantaj_kaydet_cb():
         st.session_state["puantaj_msg"] = ("error", f"⚠️ {tarih} tarihinde {isim} için zaten giriş yapılmış!")
         return
 
+    # HAFTALIK İZİN KONTROLÜ (Pazartesi - Pazar)
+    if durum == "Haftalık İzin":
+        h_baslangic = tarih - datetime.timedelta(days=tarih.weekday()) # Pazartesi
+        h_bitis = h_baslangic + datetime.timedelta(days=6) # Pazar
+        
+        # Bu hafta içinde haftalık izin kullanmış mı?
+        sorgu = supabase.table("puantaj").select("id").eq("personel_adi", isim).eq("durum", "Haftalık İzin").gte("tarih", str(h_baslangic)).lte("tarih", str(h_bitis))
+        h_izinler = db_oku(sorgu)
+        if h_izinler:
+            st.session_state["puantaj_msg"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: {isim} bu hafta ({h_baslangic.strftime('%d.%m')} - {h_bitis.strftime('%d.%m')}) içinde zaten Haftalık İzin kullanmış!")
+            return
+
     # YILLIK İZİN KONTROLÜ
     if durum == "Yıllık İzin":
         personel_bilgi = db_oku(supabase.table("personeller").select("yillik_izin_hakki").eq("isim", isim))
@@ -876,16 +888,27 @@ elif menu == "Personel & Puantaj":
                             cg, cs = st.columns(2)
                             with cg:
                                 if st.form_submit_button("Güncelle"):
+                                    hata_var = False
+                                    # Yıllık İzin Kontrolü
                                     if y_durum == "Yıllık İzin" and secilen_p['durum'] != "Yıllık İzin":
                                         p_bilgi = next((p for p in personel_listesi if p['isim'] == y_isim), None)
                                         i_hakki = float(p_bilgi.get('yillik_izin_hakki', 0)) if p_bilgi else 0
                                         kull_izinler = db_oku(supabase.table("puantaj").select("id").eq("personel_adi", y_isim).eq("durum", "Yıllık İzin"))
                                         if len(kull_izinler) >= i_hakki:
                                             st.error("Bu personelin yıllık izin hakkı kalmamıştır!")
-                                        else:
-                                            db_yaz(supabase.table("puantaj").update({"tarih": str(y_tarih), "personel_adi": y_isim, "durum": y_durum, "fazla_mesai_saati": y_mesai}).eq("id", secilen_p['id']))
-                                            st.rerun()
-                                    else:
+                                            hata_var = True
+                                            
+                                    # Haftalık İzin Kontrolü
+                                    if y_durum == "Haftalık İzin" and secilen_p['durum'] != "Haftalık İzin" and not hata_var:
+                                        h_baslangic = y_tarih - datetime.timedelta(days=y_tarih.weekday())
+                                        h_bitis = h_baslangic + datetime.timedelta(days=6)
+                                        sorgu_h = supabase.table("puantaj").select("id").eq("personel_adi", y_isim).eq("durum", "Haftalık İzin").gte("tarih", str(h_baslangic)).lte("tarih", str(h_bitis))
+                                        kull_haftalik = db_oku(sorgu_h)
+                                        if kull_haftalik:
+                                            st.error("Bu personel ilgili hafta zaten Haftalık İzin kullanmış!")
+                                            hata_var = True
+                                            
+                                    if not hata_var:
                                         db_yaz(supabase.table("puantaj").update({"tarih": str(y_tarih), "personel_adi": y_isim, "durum": y_durum, "fazla_mesai_saati": y_mesai}).eq("id", secilen_p['id']))
                                         st.rerun()
                             with cs:
@@ -907,7 +930,7 @@ elif menu == "Personel & Puantaj":
                 with c2:
                     secili_pers = st.multiselect("Personel Seç", df_puantaj['personel_adi'].unique().tolist())
                 with c3:
-                    secili_durum = st.multiselect("Durum Seç (Örn: Yıllık İzin)", df_puantaj['durum'].unique().tolist())
+                    secili_durum = st.multiselect("Durum Seç (Örn: Haftalık İzin, Yıllık İzin)", df_puantaj['durum'].unique().tolist())
             
             if len(t_aralik) == 2: df_puantaj = df_puantaj[(df_puantaj['tarih'] >= t_aralik[0]) & (df_puantaj['tarih'] <= t_aralik[1])]
             elif len(t_aralik) == 1: df_puantaj = df_puantaj[df_puantaj['tarih'] == t_aralik[0]]
@@ -923,6 +946,8 @@ elif menu == "Personel & Puantaj":
 
     with tab4:
         st.subheader("Aylık Maaş ve Mesai Hesaplama")
+        st.info("💡 **Bilgi:** Maaş kesinti veya hak ediş üzerinden hesaplanmaz; doğrudan **geldiği ve hak ettiği günler** toplanarak hesaplanır. Tam, Haftalık İzin ve Yıllık İzin = 1 gün. Yarım Gün = 0.5 gün. Ücretsiz İzin, Raporlu, Gelmedi = 0 gün.")
+        
         aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
         col1, col2 = st.columns(2)
         with col1: secilen_ay = st.selectbox("Hesaplanacak Ay", aylar, index=datetime.date.today().month - 1)
@@ -947,15 +972,29 @@ elif menu == "Personel & Puantaj":
                         mesai_saatlik_ucret = saatlik_ucret * 1.5
                         
                         pers_puantaj = df_ay[df_ay['personel_adi'] == isim]
-                        gelmedi_gun = len(pers_puantaj[pers_puantaj['durum'].isin(['Gelmedi', 'Ücretsiz İzin'])])
+                        
+                        tam_gun = len(pers_puantaj[pers_puantaj['durum'] == 'Tam Gün'])
+                        h_izin = len(pers_puantaj[pers_puantaj['durum'] == 'Haftalık İzin'])
+                        y_izin = len(pers_puantaj[pers_puantaj['durum'] == 'Yıllık İzin'])
                         yarim_gun = len(pers_puantaj[pers_puantaj['durum'] == 'Yarım Gün'])
+                        
+                        odenecek_gun = tam_gun + h_izin + y_izin + (yarim_gun * 0.5)
+                        hakedis_maas = odenecek_gun * gunluk_ucret
+                        
                         toplam_mesai = pers_puantaj['fazla_mesai_saati'].sum()
-                        
-                        kesinti_tutari = (gelmedi_gun * gunluk_ucret) + (yarim_gun * (gunluk_ucret / 2))
                         mesai_tutari = toplam_mesai * mesai_saatlik_ucret
-                        net_odenecek = maas - kesinti_tutari + mesai_tutari
                         
-                        hesap_listesi.append({"Personel": isim, "Kök Maaş": f"{maas:,.2f} ₺", "Kesinti": f"{gelmedi_gun + (yarim_gun*0.5)} Gün (-{kesinti_tutari:,.2f} ₺)", "Mesai": f"{toplam_mesai} Saat (+{mesai_tutari:,.2f} ₺)", "Net Ödenecek": f"{net_odenecek:,.2f} ₺"})
+                        net_odenecek = hakedis_maas + mesai_tutari
+                        
+                        hesap_listesi.append({
+                            "Personel": isim, 
+                            "Kök Maaş": f"{maas:,.2f} ₺", 
+                            "Ödenecek Gün": f"{odenecek_gun} Gün", 
+                            "Hak Ediş (Maaş)": f"{hakedis_maas:,.2f} ₺", 
+                            "Fazla Mesai": f"{toplam_mesai} Saat", 
+                            "Mesai Ücreti": f"+{mesai_tutari:,.2f} ₺",
+                            "Net Ödenecek": f"{net_odenecek:,.2f} ₺"
+                        })
                 
                 if hesap_listesi: st.dataframe(pd.DataFrame(hesap_listesi), hide_index=True, use_container_width=True)
                 else: st.warning("Bu ay için maaşı girilmiş ve işlem görmüş personel kaydı bulunamadı.")
