@@ -115,7 +115,6 @@ def puantaj_kaydet_cb():
         st.session_state["puantaj_msg"] = ("error", f"⚠️ {tarih} tarihinde {isim} için zaten giriş yapılmış!")
         return
 
-    # HAFTALIK İZİN KONTROLÜ (Pazartesi - Pazar)
     if durum == "Haftalık İzin":
         h_baslangic = tarih - datetime.timedelta(days=tarih.weekday())
         h_bitis = h_baslangic + datetime.timedelta(days=6)
@@ -123,10 +122,9 @@ def puantaj_kaydet_cb():
         sorgu = supabase.table("puantaj").select("id").eq("personel_adi", isim).eq("durum", "Haftalık İzin").gte("tarih", str(h_baslangic)).lte("tarih", str(h_bitis))
         h_izinler = db_oku(sorgu)
         if h_izinler:
-            st.session_state["puantaj_msg"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: {isim} bu hafta ({h_baslangic.strftime('%d.%m')} - {h_bitis.strftime('%d.%m')}) içinde zaten Haftalık İzin kullanmış!")
+            st.session_state["puantaj_msg"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: {isim} bu hafta içinde zaten Haftalık İzin kullanmış!")
             return
 
-    # YILLIK İZİN KONTROLÜ
     if durum == "Yıllık İzin":
         personel_bilgi = db_oku(supabase.table("personeller").select("yillik_izin_hakki").eq("isim", isim))
         izin_hakki = float(personel_bilgi[0].get('yillik_izin_hakki', 0)) if personel_bilgi else 0
@@ -135,7 +133,7 @@ def puantaj_kaydet_cb():
         kullanilan_gun_sayisi = len(kullanilan_izinler)
         
         if kullanilan_gun_sayisi >= izin_hakki:
-            st.session_state["puantaj_msg"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: {isim} adlı personelin tanımlı Yıllık İzin hakkı kalmamıştır! (Hakkı: {izin_hakki} gün, Kullanılan: {kullanilan_gun_sayisi} gün)")
+            st.session_state["puantaj_msg"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: Yıllık İzin hakkı kalmamıştır! (Kullanılan: {kullanilan_gun_sayisi} gün)")
             return
         
     veri = {"tarih": str(tarih), "personel_adi": isim, "durum": durum, "fazla_mesai_saati": mesai}
@@ -399,7 +397,7 @@ elif menu == "Trendyol Yönetimi": platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
-    tab1, tab2, tab3 = st.tabs(["💵 İşlem Girişi", "📊 Bakiye ve Ekstre", "⚙️ Hesap / Kart Ekle"])
+    tab1, tab2, tab4, tab3 = st.tabs(["💵 İşlem Girişi", "📊 Bakiye ve Ekstre", "📂 Excel İçe Aktar (Otomatik)", "⚙️ Hesap / Kart Ekle"])
     
     with tab3:
         st.subheader("Sisteme Yeni Banka veya Kart Ekle")
@@ -504,6 +502,152 @@ elif menu == "Banka & Kart Yönetimi":
             st.divider()
             st.subheader("Tüm Banka ve Kart Hareketleri Dökümü")
             st.dataframe(pd.DataFrame(islemler_b)[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+
+    with tab4:
+        st.subheader("📂 Banka Ekstresi (Excel) İçe Aktar ve Öğret")
+        st.info("💡 **Yapay Zeka Modülü:** Bankanızdan indirdiğiniz Excel'i buraya yükleyin. Sistem, açıklamalardaki kelimelere göre işlemleri (Masraf, Cari, Para Girişi) otomatik tanır.")
+        
+        alt_tab1, alt_tab2 = st.tabs(["📤 Excel Yükle ve Aktar", "🧠 Kelime Kuralları (Öğret)"])
+        
+        with alt_tab2:
+            st.write("Açıklama içinde geçen kelimeleri sisteme öğreterek otomatik eşleştirme yapabilirsiniz.")
+            
+            # Seçenekleri çek
+            tipler_db = db_oku(supabase.table("masraf_tipleri").select("*"))
+            masraf_tipleri = [t['tip_adi'] for t in tipler_db] if tipler_db else ["Genel Masraf"]
+            cariler_db = db_oku(supabase.table("cariler").select("*"))
+            cari_liste = [c['isim'] for c in cariler_db] if cariler_db else []
+            
+            with st.form("kural_ekle_form"):
+                k_kelime = st.text_input("Açıklamada Geçen Kelime (Örn: BİM, AHMET, POS)")
+                k_islem = st.selectbox("Bunu Hangi İşlem Olarak Tanısın?", ["Masraf", "Cari Ödeme (Para Çıkışı)", "Para Girişi", "Para Çıkışı"])
+                k_hedef = st.selectbox("Hedef / Alt Kategori (Sadece Masraf ve Cari İçin)", ["- Yok -"] + masraf_tipleri + cari_liste)
+                
+                if st.form_submit_button("Kuralı Öğret"):
+                    if k_kelime.strip():
+                        db_yaz(supabase.table("banka_kurallari").insert({"kelime": k_kelime.strip(), "islem_tipi": k_islem, "hedef": k_hedef}))
+                        st.success("Öğrenildi!")
+                        st.rerun()
+                        
+            st.divider()
+            kurallar_db = db_oku(supabase.table("banka_kurallari").select("*"))
+            if kurallar_db:
+                st.write("**Aktif Kurallar:**")
+                for k in kurallar_db:
+                    col1, col2 = st.columns([4, 1])
+                    with col1: st.write(f"Kelime: **{k['kelime']}** ➡️ İşlem: **{k['islem_tipi']}** | Hedef: **{k['hedef']}**")
+                    with col2:
+                        if st.button("Sil", key=f"del_k_{k['id']}"):
+                            db_yaz(supabase.table("banka_kurallari").delete().eq("id", k['id']))
+                            st.rerun()
+
+        with alt_tab1:
+            bankalar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
+            banka_isimleri = [b['isim'] for b in bankalar_db] if bankalar_db else []
+            
+            if not banka_isimleri:
+                st.warning("Lütfen önce sisteme bir banka hesabı ekleyin.")
+            else:
+                h_secim = st.selectbox("Hangi Hesaba Aktarılacak?", banka_isimleri)
+                uploaded_file = st.file_uploader("Banka Ekstresi Yükle (Excel veya CSV)", type=["xlsx", "xls", "csv"])
+                
+                if uploaded_file is not None:
+                    try:
+                        if uploaded_file.name.endswith(".csv"): df_yuk = pd.read_csv(uploaded_file)
+                        else: df_yuk = pd.read_excel(uploaded_file)
+                        
+                        st.success("Dosya okundu. Lütfen sütunları eşleştirin:")
+                        cols = ["Yok"] + df_yuk.columns.tolist()
+                        
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1: col_tar = st.selectbox("Tarih Sütunu", cols, index=1 if len(cols)>1 else 0)
+                        with c2: col_ack = st.selectbox("Açıklama Sütunu", cols, index=2 if len(cols)>2 else 0)
+                        with c3: col_cik = st.selectbox("Çıkan Tutar (Borç)", cols)
+                        with c4: col_gir = st.selectbox("Giren Tutar (Alacak)", cols)
+                        
+                        if st.button("Verileri İncele ve Kuralları Uygula"):
+                            if col_tar == "Yok" or col_ack == "Yok":
+                                st.error("Tarih ve Açıklama sütunları zorunludur!")
+                            else:
+                                kurallar_db = db_oku(supabase.table("banka_kurallari").select("*"))
+                                preview = []
+                                
+                                for i, row in df_yuk.iterrows():
+                                    t_val = row[col_tar]
+                                    ack_val = str(row[col_ack])
+                                    
+                                    g_tutar = 0.0
+                                    c_tutar = 0.0
+                                    if col_gir != "Yok" and not pd.isna(row[col_gir]): g_tutar = float(str(row[col_gir]).replace(',', ''))
+                                    if col_cik != "Yok" and not pd.isna(row[col_cik]): c_tutar = float(str(row[col_cik]).replace(',', ''))
+                                    
+                                    if g_tutar > 0:
+                                        tutar = g_tutar
+                                        i_tip = "Para Girişi"
+                                    elif c_tutar > 0:
+                                        tutar = c_tutar
+                                        i_tip = "Para Çıkışı"
+                                    else:
+                                        continue
+                                        
+                                    h_def = ""
+                                    # KURAL KONTROLÜ
+                                    if kurallar_db:
+                                        for kr in kurallar_db:
+                                            if str(kr['kelime']).lower() in ack_val.lower():
+                                                i_tip = kr['islem_tipi']
+                                                h_def = kr['hedef']
+                                                break
+                                                
+                                    try: tar_str = str(pd.to_datetime(t_val).date())
+                                    except: tar_str = str(datetime.date.today())
+                                    
+                                    preview.append({
+                                        "İşle": True, "Tarih": tar_str, "Açıklama": ack_val, "Tutar": tutar, "İşlem Tipi": i_tip, "Hedef Kategori": h_def if h_def != "- Yok -" else ""
+                                    })
+                                    
+                                st.session_state['excel_preview'] = preview
+
+                    except Exception as e:
+                        st.error(f"Dosya okuma hatası: {e}")
+                        
+                if 'excel_preview' in st.session_state:
+                    st.write("### 📌 İşlem Önizlemesi (İstediğinizi Düzeltebilirsiniz)")
+                    df_p = pd.DataFrame(st.session_state['excel_preview'])
+                    
+                    edited_df = st.data_editor(
+                        df_p,
+                        column_config={
+                            "İşle": st.column_config.CheckboxColumn("İşle", default=True),
+                            "İşlem Tipi": st.column_config.SelectboxColumn("İşlem Tipi", options=["Para Girişi", "Para Çıkışı", "Masraf", "Cari Ödeme (Para Çıkışı)"])
+                        },
+                        hide_index=True, use_container_width=True
+                    )
+                    
+                    if st.button("✅ Seçili İşlemleri Sisteme Kaydet", type="primary"):
+                        secilen_rows = edited_df[edited_df['İşle'] == True]
+                        basarili = 0
+                        for idx, r in secilen_rows.iterrows():
+                            tip = r['İşlem Tipi']
+                            tar = r['Tarih']
+                            tut = float(r['Tutar'])
+                            ack = r['Açıklama']
+                            hedef = r['Hedef Kategori']
+                            
+                            if tip == "Masraf":
+                                db_yaz(supabase.table("masraf").insert({"tarih": tar, "masraf_tipi": hedef, "aciklama": ack, "tutar": tut, "odeme_tipi": h_secim}))
+                                db_yaz(supabase.table("banka_islemleri").insert({"tarih": tar, "hesap_adi": h_secim, "islem_tipi": "Para Çıkışı (Masraf)", "tutar": tut, "aciklama": f"Masraf: {ack}"}))
+                            elif tip == "Cari Ödeme (Para Çıkışı)":
+                                db_yaz(supabase.table("cari_islemler").insert({"tarih": tar, "cari_adi": hedef, "islem_tipi": "Ödeme Yaptık (Borç Düşer)", "tutar": tut, "aciklama": f"Banka: {ack}"}))
+                                db_yaz(supabase.table("banka_islemleri").insert({"tarih": tar, "hesap_adi": h_secim, "islem_tipi": "Para Çıkışı", "karsi_hesap": hedef, "tutar": tut, "aciklama": f"Cari Ödeme: {ack}"}))
+                            else:
+                                db_yaz(supabase.table("banka_islemleri").insert({"tarih": tar, "hesap_adi": h_secim, "islem_tipi": tip, "tutar": tut, "aciklama": ack}))
+                                
+                            basarili += 1
+                            
+                        st.success(f"Harika! Toplam {basarili} işlem sisteme başarıyla işlendi.")
+                        del st.session_state['excel_preview']
+                        st.rerun()
 
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
@@ -978,10 +1122,7 @@ elif menu == "Personel & Puantaj":
                         
                         odenecek_gun = tam_gun + h_izin + y_izin + (yarim_gun * 0.5)
                         
-                        # --- TÜRKİYE BORDRO STANDARDI (30 GÜN KURALI) ---
                         _, aydaki_gun_sayisi = calendar.monthrange(secilen_yil, ay_index)
-                        
-                        # Eğer ay sonunda tam çalışıldıysa 30'a sabitle
                         if aydaki_gun_sayisi in [28, 29] and odenecek_gun == aydaki_gun_sayisi:
                             odenecek_gun = 30
                         if odenecek_gun > 30:
