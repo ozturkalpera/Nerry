@@ -761,7 +761,7 @@ elif menu == "Kasa Yönetimi (Virman)":
         st.write(f"Açılış: {k2_a:,.2f} | Giriş: {k2_g:,.2f} | Çıkış: -{k2_c:,.2f} | Fark: {(k2_f-k2_e):,.2f}")
         st.metric("NET", f"{k2_net:,.2f} ₺")
 
-# --- PERSONEL MODÜLÜ (YENİLENMİŞ) ---
+# --- PERSONEL MODÜLÜ ---
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
     tab1, tab2, tab4, tab3 = st.tabs(["📝 Puantaj Girişi", "📋 Filtreli Geçmiş Kayıtlar", "💰 Maaş Hesaplama", "⚙️ Personel Yönetimi"])
@@ -849,7 +849,7 @@ elif menu == "Personel & Puantaj":
                 st.date_input("Tarih", datetime.date.today(), key="puantaj_tarih")
                 st.selectbox("Personel", [p['isim'] for p in personel_listesi], key="puantaj_isim")
             with c2:
-                st.selectbox("Durum", ["Tam Gün", "Yarım Gün", "Yıllık İzin", "Ücretsiz İzin", "Raporlu", "Gelmedi"], key="puantaj_durum")
+                st.selectbox("Durum", ["Tam Gün", "Yarım Gün", "Haftalık İzin", "Yıllık İzin", "Ücretsiz İzin", "Raporlu", "Gelmedi"], key="puantaj_durum")
                 st.number_input("Mesai (Saat)", min_value=0.0, step=0.5, key="puantaj_mesai")
             st.button("Kaydet", on_click=puantaj_kaydet_cb, type="primary")
 
@@ -866,13 +866,16 @@ elif menu == "Personel & Puantaj":
                             except: y_tar = datetime.date.today()
                             y_tarih = st.date_input("Tarih", value=y_tar)
                             y_isim = st.selectbox("Personel", [pr['isim'] for pr in personel_listesi], index=[pr['isim'] for pr in personel_listesi].index(secilen_p['personel_adi']))
-                            y_durum = st.selectbox("Durum", ["Tam Gün", "Yarım Gün", "Yıllık İzin", "Ücretsiz İzin", "Raporlu", "Gelmedi"], index=["Tam Gün", "Yarım Gün", "Yıllık İzin", "Ücretsiz İzin", "Raporlu", "Gelmedi"].index(secilen_p['durum']))
+                            
+                            durumlar = ["Tam Gün", "Yarım Gün", "Haftalık İzin", "Yıllık İzin", "Ücretsiz İzin", "Raporlu", "Gelmedi"]
+                            idx_dur = durumlar.index(secilen_p['durum']) if secilen_p['durum'] in durumlar else 0
+                            y_durum = st.selectbox("Durum", durumlar, index=idx_dur)
+                            
                             y_mesai = st.number_input("Mesai", value=float(secilen_p['fazla_mesai_saati']))
                             
                             cg, cs = st.columns(2)
                             with cg:
                                 if st.form_submit_button("Güncelle"):
-                                    # Yıllık İzin Çevirme Kontrolü
                                     if y_durum == "Yıllık İzin" and secilen_p['durum'] != "Yıllık İzin":
                                         p_bilgi = next((p for p in personel_listesi if p['isim'] == y_isim), None)
                                         i_hakki = float(p_bilgi.get('yillik_izin_hakki', 0)) if p_bilgi else 0
