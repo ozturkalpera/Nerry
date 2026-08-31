@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import io
+import calendar
 from supabase import create_client, Client
 
 st.set_page_config(page_title="Cafe Yönetim", layout="wide")
@@ -54,6 +55,8 @@ def platform_kaydet_cb(plat_adi):
         return
 
     hata = False
+    for o_tip, tutar in [("Online", Kapıda Ödeme)]: # Sabit mantık döngüsü
+        pass
     for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
         if tutar > 0:
             ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", plat_adi).eq("odeme_tipi", o_tip))
@@ -116,10 +119,9 @@ def puantaj_kaydet_cb():
 
     # HAFTALIK İZİN KONTROLÜ (Pazartesi - Pazar)
     if durum == "Haftalık İzin":
-        h_baslangic = tarih - datetime.timedelta(days=tarih.weekday()) # Pazartesi
-        h_bitis = h_baslangic + datetime.timedelta(days=6) # Pazar
+        h_baslangic = tarih - datetime.timedelta(days=tarih.weekday())
+        h_bitis = h_baslangic + datetime.timedelta(days=6)
         
-        # Bu hafta içinde haftalık izin kullanmış mı?
         sorgu = supabase.table("puantaj").select("id").eq("personel_adi", isim).eq("durum", "Haftalık İzin").gte("tarih", str(h_baslangic)).lte("tarih", str(h_bitis))
         h_izinler = db_oku(sorgu)
         if h_izinler:
@@ -889,7 +891,6 @@ elif menu == "Personel & Puantaj":
                             with cg:
                                 if st.form_submit_button("Güncelle"):
                                     hata_var = False
-                                    # Yıllık İzin Kontrolü
                                     if y_durum == "Yıllık İzin" and secilen_p['durum'] != "Yıllık İzin":
                                         p_bilgi = next((p for p in personel_listesi if p['isim'] == y_isim), None)
                                         i_hakki = float(p_bilgi.get('yillik_izin_hakki', 0)) if p_bilgi else 0
@@ -898,7 +899,6 @@ elif menu == "Personel & Puantaj":
                                             st.error("Bu personelin yıllık izin hakkı kalmamıştır!")
                                             hata_var = True
                                             
-                                    # Haftalık İzin Kontrolü
                                     if y_durum == "Haftalık İzin" and secilen_p['durum'] != "Haftalık İzin" and not hata_var:
                                         h_baslangic = y_tarih - datetime.timedelta(days=y_tarih.weekday())
                                         h_bitis = h_baslangic + datetime.timedelta(days=6)
@@ -946,7 +946,7 @@ elif menu == "Personel & Puantaj":
 
     with tab4:
         st.subheader("Aylık Maaş ve Mesai Hesaplama")
-        st.info("💡 **Bilgi:** Maaş kesinti veya hak ediş üzerinden hesaplanmaz; doğrudan **geldiği ve hak ettiği günler** toplanarak hesaplanır. Tam, Haftalık İzin ve Yıllık İzin = 1 gün. Yarım Gün = 0.5 gün. Ücretsiz İzin, Raporlu, Gelmedi = 0 gün.")
+        st.info("💡 **Bilgi:** Maaş kesinti üzerinden değil; geldiği ve hak ettiği günler üzerinden hesaplanır (SGK Standartları). Tam Gün, Haftalık İzin ve Yıllık İzin = **1 Gün**. Yarım Gün = **0.5 Gün**.")
         
         aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
         col1, col2 = st.columns(2)
@@ -979,25 +979,35 @@ elif menu == "Personel & Puantaj":
                         yarim_gun = len(pers_puantaj[pers_puantaj['durum'] == 'Yarım Gün'])
                         
                         odenecek_gun = tam_gun + h_izin + y_izin + (yarim_gun * 0.5)
-                        hakedis_maas = odenecek_gun * gunluk_ucret
                         
+                        # --- TÜRKİYE BORDRO STANDARDI (30 GÜN KURALI) ---
+                        _, aydaki_gun_sayisi = calendar.monthrange(secilen_yil, ay_index)
+                        
+                        # Eğer Şubat ayında tam çalışıldıysa 30'a tamamla
+                        if aydaki_gun_sayisi in [28, 29] and odenecek_gun == aydaki_gun_sayisi:
+                            odenecek_gun = 30
+                            
+                        # Ağustos gibi 31 çeken aylarda 31 gün çalışılsa bile maaşı 30 gün üzerinden ver (Fazla hesabı engelle)
+                        if odenecek_gun > 30:
+                            odenecek_gun = 30
+                            
+                        hakedis_maas = odenecek_gun * gunluk_ucret
                         toplam_mesai = pers_puantaj['fazla_mesai_saati'].sum()
                         mesai_tutari = toplam_mesai * mesai_saatlik_ucret
-                        
                         net_odenecek = hakedis_maas + mesai_tutari
                         
                         hesap_listesi.append({
                             "Personel": isim, 
                             "Kök Maaş": f"{maas:,.2f} ₺", 
                             "Ödenecek Gün": f"{odenecek_gun} Gün", 
-                            "Hak Ediş (Maaş)": f"{hakedis_maas:,.2f} ₺", 
-                            "Fazla Mesai": f"{toplam_mesai} Saat", 
+                            "Hak Ediş": f"{hakedis_maas:,.2f} ₺", 
+                            "Mesai Süresi": f"{toplam_mesai} Saat", 
                             "Mesai Ücreti": f"+{mesai_tutari:,.2f} ₺",
                             "Net Ödenecek": f"{net_odenecek:,.2f} ₺"
                         })
                 
                 if hesap_listesi: st.dataframe(pd.DataFrame(hesap_listesi), hide_index=True, use_container_width=True)
-                else: st.warning("Bu ay için maaşı girilmiş ve işlem görmüş personel kaydı bulunamadı.")
+                else: st.warning("Bu ay için puantaj işlemi görmüş kayıtlı personel bulunamadı.")
             else:
                 st.warning("Henüz puantaj kaydı bulunmuyor.")
 
