@@ -38,7 +38,7 @@ def db_yaz(sorgu):
         st.error(f"⚠️ İşlem Başarısız Oldu. Hata Detayı: {e}")
         return False
 
-# --- CALLBACK (ARKA PLAN) FONKSİYONLARI ---
+# --- CALLBACK FONKSİYONLARI ---
 def platform_kaydet_cb(plat_adi):
     tarih = st.session_state[f"{plat_adi}_tarih"]
     online = st.session_state[f"{plat_adi}_on"]
@@ -138,14 +138,10 @@ def masraf_kaydet_cb():
         
         if odeme.startswith("Cari - "):
             cari_adi = odeme.replace("Cari - ", "")
-            db_yaz(supabase.table("cari_islemler").insert({
-                "tarih": str(tarih), "cari_adi": cari_adi, "islem_tipi": "Gelen Fatura (Bize Borç Yazar)", "tutar": tutar, "aciklama": f"Masraf: {aciklama}"
-            }))
+            db_yaz(supabase.table("cari_islemler").insert({"tarih": str(tarih), "cari_adi": cari_adi, "islem_tipi": "Gelen Fatura (Bize Borç Yazar)", "tutar": tutar, "aciklama": f"Masraf: {aciklama}"}))
             st.session_state["masraf_msg"] = ("success", f"Masraf kaydedildi ve {cari_adi} hesabına borç işlendi!")
         elif odeme in banka_liste:
-            db_yaz(supabase.table("banka_islemleri").insert({
-                "tarih": str(tarih), "hesap_adi": odeme, "islem_tipi": "Para Çıkışı (Masraf)", "tutar": tutar, "aciklama": f"Masraf: {aciklama}"
-            }))
+            db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(tarih), "hesap_adi": odeme, "islem_tipi": "Para Çıkışı (Masraf)", "tutar": tutar, "aciklama": f"Masraf: {aciklama}"}))
             st.session_state["masraf_msg"] = ("success", f"Masraf kaydedildi ve {odeme} hesabından düşüldü!")
         else:
             st.session_state["masraf_msg"] = ("success", "Masraf başarıyla kaydedildi!")
@@ -179,8 +175,7 @@ if not st.session_state.giris_yapildi:
     with st.form("login_form"):
         kullanici = st.text_input("Kullanıcı Adı")
         sifre = st.text_input("Şifre", type="password")
-        submit_btn = st.form_submit_button("Giriş Yap")
-        if submit_btn:
+        if st.form_submit_button("Giriş Yap"):
             k = kullanici.strip().lower()
             s = sifre.strip()
             if (k == "admin" and s == "admin123") or (k == "user" and s == "user123"):
@@ -281,7 +276,6 @@ def platform_sayfasi(platform_adi):
                 disabled=['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi'],
                 hide_index=True, use_container_width=True, key=f"{platform_adi}_editor"
             )
-            
             secilenler = edited_df[edited_df["Seç"] == True]
             col1, col2 = st.columns(2)
             with col1: st.write(f"Tüm Bekleyenlerin Toplamı: **{df['net'].sum():,.2f} ₺**")
@@ -308,11 +302,9 @@ def platform_sayfasi(platform_adi):
             y_o_kom = st.number_input("Online Komisyon (%)", value=10.0)
             y_o_stop = st.number_input("Online Stopaj (%)", value=0.0)
             y_o_vade = st.number_input("Online Vade", value=1, step=1)
-            
             y_k_kom = st.number_input("Kapıda Komisyon (%)", value=10.0)
             y_k_stop = st.number_input("Kapıda Stopaj (%)", value=0.0)
             y_k_vade = st.number_input("Kapıda Vade", value=1, step=1)
-            
             if st.form_submit_button("Ayarları Kaydet"):
                 db_yaz(supabase.table("ayarlar").delete().eq("platform", platform_adi))
                 db_yaz(supabase.table("ayarlar").insert([
@@ -322,7 +314,7 @@ def platform_sayfasi(platform_adi):
                 st.success("Ayarlar güncellendi!")
                 st.rerun()
 
-# --- MENÜ YÖNLENDİRMELERİ ---
+# --- MENÜLER ---
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     if "ciro_msg" in st.session_state:
@@ -372,11 +364,14 @@ if menu == "Günlük Dükkan Cirosu":
                             db_yaz(supabase.table("ciro").delete().eq("id", secilen_c['id']))
                             st.rerun()
 
-elif menu == "Yemek Sepeti Yönetimi":
-    platform_sayfasi("Yemek Sepeti")
+    st.subheader("📋 Geçmiş Ciro Kayıtları")
+    cirolar = db_oku(supabase.table("ciro").select("*").order("tarih", desc=True))
+    if cirolar:
+        df_ciro = pd.DataFrame(cirolar)
+        st.dataframe(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
 
-elif menu == "Trendyol Yönetimi":
-    platform_sayfasi("Trendyol")
+elif menu == "Yemek Sepeti Yönetimi": platform_sayfasi("Yemek Sepeti")
+elif menu == "Trendyol Yönetimi": platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
@@ -392,7 +387,6 @@ elif menu == "Banka & Kart Yönetimi":
                     db_yaz(supabase.table("banka_hesaplari").insert({"isim": b_isim.strip(), "tip": b_tip}))
                     st.success("Hesap eklendi!")
                     st.rerun()
-
         st.divider()
         bankalar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
         if bankalar_db:
@@ -440,8 +434,7 @@ elif menu == "Banka & Kart Yönetimi":
                     db_yaz(supabase.table("banka_islemleri").insert(veri))
                     st.success("İşlem kaydedildi!")
                     st.rerun()
-                else:
-                    st.warning("Tutar 0'dan büyük olmalıdır.")
+                else: st.warning("Tutar 0'dan büyük olmalıdır.")
                     
             st.divider()
             with st.expander("✏️ Geçmiş İşlemi Düzenle/Sil", expanded=False):
@@ -455,7 +448,6 @@ elif menu == "Banka & Kart Yönetimi":
                             y_b_tarih = st.date_input("Tarih", value=datetime.datetime.strptime(sec_bi['tarih'], '%Y-%m-%d').date())
                             y_b_tutar = st.number_input("Tutar", value=float(sec_bi['tutar']))
                             y_b_ack = st.text_input("Açıklama", value=sec_bi.get('aciklama', ''))
-                            
                             cg, cs = st.columns(2)
                             with cg:
                                 if st.form_submit_button("Güncelle"):
@@ -465,8 +457,6 @@ elif menu == "Banka & Kart Yönetimi":
                                 if st.form_submit_button("Sil"):
                                     db_yaz(supabase.table("banka_islemleri").delete().eq("id", sec_bi['id']))
                                     st.rerun()
-        else:
-            st.warning("Lütfen önce Hesap / Kart ekleyin.")
 
     with tab2:
         st.subheader("Hesap Bakiyeleri ve Kart Borçları")
@@ -479,22 +469,17 @@ elif menu == "Banka & Kart Yönetimi":
                 tip = i['islem_tipi']
                 tut = float(i['tutar'])
                 kh = i.get('karsi_hesap')
-                
                 if h in hesap_sozluk:
                     if tip in ["Açılış", "Para Girişi"]: hesap_sozluk[h]['Bakiye (Eksi İse Borç)'] += tut
                     elif tip in ["Para Çıkışı", "Para Çıkışı (Masraf)", "Bankalar Arası Virman", "Kredi Kartı Borç Ödemesi"]: hesap_sozluk[h]['Bakiye (Eksi İse Borç)'] -= tut
-                        
                 if kh and kh in hesap_sozluk:
                     if tip == "Bankalar Arası Virman": hesap_sozluk[kh]['Bakiye (Eksi İse Borç)'] += tut
                     elif tip == "Kredi Kartı Borç Ödemesi": hesap_sozluk[kh]['Bakiye (Eksi İse Borç)'] += tut 
-
             df_bakiye = pd.DataFrame.from_dict(hesap_sozluk, orient='index').reset_index().rename(columns={'index': 'Hesap / Kart Adı'})
             st.dataframe(df_bakiye, hide_index=True, use_container_width=True)
-            
             st.divider()
             st.subheader("Tüm Banka ve Kart Hareketleri Dökümü")
-            df_islem = pd.DataFrame(islemler_b)
-            st.dataframe(df_islem[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(islemler_b)[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
 
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
@@ -503,13 +488,13 @@ elif menu == "Masraf Girişi":
 
     with st.expander("⚙️ Yeni Masraf Tipi Tanımla", expanded=False):
         with st.form("masraf_tipi_form"):
-            yeni_tip = st.text_input("Masraf Tipi Adı (Örn: Mutfak, Fatura)")
+            yeni_tip = st.text_input("Masraf Tipi Adı")
             if st.form_submit_button("Ekle"):
                 if yeni_tip.strip():
                     db_yaz(supabase.table("masraf_tipleri").insert({"tip_adi": yeni_tip.strip()}))
                     st.rerun()
-
     st.divider()
+
     if "masraf_msg" in st.session_state:
         m_type, m_text = st.session_state["masraf_msg"]
         if m_type == "success": st.success(m_text)
@@ -530,7 +515,6 @@ elif menu == "Masraf Girişi":
     with c2:
         st.number_input("Tutar (₺)", min_value=0.0, key="masraf_tutar")
         st.selectbox("Nereden Ödendi?", odeme_yontemleri, key="masraf_odeme")
-    
     st.button("Masrafı Kaydet", on_click=masraf_kaydet_cb, type="primary")
 
     st.divider()
@@ -587,7 +571,7 @@ elif menu == "Masraf Girişi":
         df_masraf = pd.DataFrame(masraflar)
         df_masraf['masraf_tipi'] = df_masraf.get('masraf_tipi', 'Genel').fillna('Genel Masraf')
         df_masraf['tarih'] = pd.to_datetime(df_masraf['tarih']).dt.date
-        with st.expander("🔍 Filtreleme", expanded=True):
+        with st.expander("🔍 Filtreleme Seçenekleri", expanded=True):
             c1, c2, c3, c4 = st.columns(4)
             with c1: tarih_araligi = st.date_input("Tarih Aralığı", [df_masraf['tarih'].min(), df_masraf['tarih'].max()])
             with c2: sec_tip = st.multiselect("Masraf Tipi", df_masraf['masraf_tipi'].unique().tolist())
@@ -603,12 +587,12 @@ elif menu == "Masraf Girişi":
 
 elif menu == "Cari (Tedarikçi) Yönetimi":
     st.header("🏢 Cari (Tedarikçi) Yönetimi")
-    tab1, tab2, tab3 = st.tabs(["📈 Fatura & Ödeme Girişi", "📋 Cari Ekstre ve Bakiye", "⚙️ Tedarikçi Ekle"])
+    tab1, tab2, tab3 = st.tabs(["📈 Fatura & Ödeme Girişi", "📋 Cari Ekstre", "⚙️ Tedarikçi Ekle"])
     
     with tab3:
         with st.form("cari_ekle_form"):
             yeni_cari = st.text_input("Tedarikçi Firma / Kişi Adı")
-            if st.form_submit_button("Cari Ekle"):
+            if st.form_submit_button("Ekle"):
                 if yeni_cari.strip():
                     db_yaz(supabase.table("cariler").insert({"isim": yeni_cari.strip()}))
                     st.rerun()
@@ -649,7 +633,6 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                 st.number_input("Tutar (₺)", min_value=0.0, key="cari_islem_tutar")
                 st.text_input("Açıklama / Fatura No", key="cari_islem_aciklama")
                 st.button("İşlemi Kaydet", on_click=cari_islem_kaydet_cb, type="primary")
-                
             st.divider()
             with st.expander("✏️ Geçmiş İşlemi Düzenle/Sil", expanded=False):
                 islemler = db_oku(supabase.table("cari_islemler").select("*").order("tarih", desc=True))
@@ -766,18 +749,25 @@ elif menu == "Kasa Yönetimi (Virman)":
         st.write(f"Açılış: {k2_a:,.2f} | Giriş: {k2_g:,.2f} | Çıkış: -{k2_c:,.2f} | Fark: {(k2_f-k2_e):,.2f}")
         st.metric("NET", f"{k2_net:,.2f} ₺")
 
+# --- PERSONEL VE YENİ MAAŞ HESAPLAMA EKRANI ---
 elif menu == "Personel & Puantaj":
-    st.header("👥 Personel & Puantaj Yönetimi")
-    tab1, tab2, tab3 = st.tabs(["📝 Puantaj Girişi", "📋 Geçmiş Kayıtlar", "⚙️ Personel Yönetimi"])
+    st.header("👥 Personel, Puantaj ve Maaş Yönetimi")
+    tab1, tab2, tab4, tab3 = st.tabs(["📝 Puantaj Girişi", "📋 Geçmiş Kayıtlar", "💰 Maaş Hesaplama", "⚙️ Personel Yönetimi"])
     
     with tab3:
         with st.form("personel_ekle_form"):
-            yeni_personel = st.text_input("Personel Adı")
+            yeni_personel = st.text_input("Personel Adı Soyadı")
+            yeni_maas = st.number_input("Aylık Net Maaşı (₺)", min_value=0.0)
+            yeni_tarih = st.date_input("İşe Başlama Tarihi", datetime.date.today())
+            
             if st.form_submit_button("Ekle"):
-                db_yaz(supabase.table("personeller").insert({"isim": yeni_personel.strip()}))
-                st.rerun()
+                if yeni_personel.strip():
+                    db_yaz(supabase.table("personeller").insert({"isim": yeni_personel.strip(), "maas": yeni_maas, "ise_baslama_tarihi": str(yeni_tarih)}))
+                    st.success("Eklendi!")
+                    st.rerun()
+                    
         st.divider()
-        with st.expander("✏️ Personel Düzenle/Sil", expanded=False):
+        with st.expander("✏️ Personel Düzenle veya Sil", expanded=False):
             personel_listesi = db_oku(supabase.table("personeller").select("*"))
             if personel_listesi:
                 sec_pers_str = st.selectbox("Seç", ["Seç..."] + [p['isim'] for p in personel_listesi])
@@ -785,10 +775,16 @@ elif menu == "Personel & Puantaj":
                     sec_pers = next(p for p in personel_listesi if p['isim'] == sec_pers_str)
                     with st.form("p_duz"):
                         y_isim = st.text_input("Adı", value=sec_pers['isim'])
+                        y_maas = st.number_input("Maaş (₺)", value=float(sec_pers.get('maas', 0.0)))
+                        
+                        try: p_tar = datetime.datetime.strptime(sec_pers.get('ise_baslama_tarihi', str(datetime.date.today())), '%Y-%m-%d').date()
+                        except: p_tar = datetime.date.today()
+                        y_tarih = st.date_input("Başlama Tarihi", value=p_tar)
+                        
                         cg, cs = st.columns(2)
                         with cg:
                             if st.form_submit_button("Güncelle"):
-                                db_yaz(supabase.table("personeller").update({"isim": y_isim}).eq("id", sec_pers['id']))
+                                db_yaz(supabase.table("personeller").update({"isim": y_isim, "maas": y_maas, "ise_baslama_tarihi": str(y_tarih)}).eq("id", sec_pers['id']))
                                 db_yaz(supabase.table("puantaj").update({"personel_adi": y_isim}).eq("personel_adi", sec_pers['isim']))
                                 st.rerun()
                         with cs:
@@ -809,8 +805,9 @@ elif menu == "Personel & Puantaj":
                 st.date_input("Tarih", datetime.date.today(), key="puantaj_tarih")
                 st.selectbox("Personel", [p['isim'] for p in personel_listesi], key="puantaj_isim")
             with c2:
-                st.selectbox("Durum", ["Tam Gün", "Yarım Gün", "İzinli", "Raporlu", "Gelmedi"], key="puantaj_durum")
-                st.number_input("Mesai (Saat)", min_value=0.0, step=0.5, key="puantaj_mesai")
+                # İZİN TİPLERİ GÜNCELLENDİ
+                st.selectbox("Durum", ["Tam Gün", "Yarım Gün", "Yıllık İzin", "Ücretsiz İzin", "Raporlu", "Gelmedi"], key="puantaj_durum")
+                st.number_input("Fazla Mesai (Saat)", min_value=0.0, step=0.5, key="puantaj_mesai")
             st.button("Kaydet", on_click=puantaj_kaydet_cb, type="primary")
 
     with tab2:
@@ -818,12 +815,65 @@ elif menu == "Personel & Puantaj":
         if puantajlar:
             st.dataframe(pd.DataFrame(puantajlar)[['tarih', 'personel_adi', 'durum', 'fazla_mesai_saati']], hide_index=True, use_container_width=True)
 
-# --- YENİ EKLENEN VE RESTORE EDİLEN RAPORLAR BÖLÜMÜ ---
+    with tab4:
+        st.subheader("Aylık Maaş ve Mesai Hesaplama")
+        st.info("💡 **Bilgi:** Günlük kesinti (Maaş/30) üzerinden yapılır. Saatlik mesai ücreti ise zamlı olarak (Maaş/225) x 1.5 üzerinden hesaplanmaktadır. Ücretsiz İzin ve Gelmediği günler tam kesilir, Yarım Günler yarım kesilir. Yıllık İzin ve Raporlu günlerden kesinti yapılmaz.")
+        
+        aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        col1, col2 = st.columns(2)
+        with col1: secilen_ay = st.selectbox("Hesaplanacak Ay", aylar, index=datetime.date.today().month - 1)
+        with col2: secilen_yil = st.number_input("Yıl", value=datetime.date.today().year, step=1)
+        ay_index = aylar.index(secilen_ay) + 1
+        
+        if st.button("Maaşları Hesapla", type="primary"):
+            tum_personel = db_oku(supabase.table("personeller").select("*"))
+            tum_puantaj = db_oku(supabase.table("puantaj").select("*"))
+            
+            if tum_personel and tum_puantaj:
+                df_p = pd.DataFrame(tum_puantaj)
+                df_p['tarih'] = pd.to_datetime(df_p['tarih'])
+                df_ay = df_p[(df_p['tarih'].dt.month == ay_index) & (df_p['tarih'].dt.year == secilen_yil)]
+                
+                hesap_listesi = []
+                for pers in tum_personel:
+                    isim = pers['isim']
+                    maas = float(pers.get('maas', 0.0))
+                    
+                    if maas > 0:
+                        gunluk_ucret = maas / 30
+                        saatlik_ucret = maas / 225
+                        mesai_saatlik_ucret = saatlik_ucret * 1.5
+                        
+                        pers_puantaj = df_ay[df_ay['personel_adi'] == isim]
+                        
+                        gelmedi_gun = len(pers_puantaj[pers_puantaj['durum'].isin(['Gelmedi', 'Ücretsiz İzin'])])
+                        yarim_gun = len(pers_puantaj[pers_puantaj['durum'] == 'Yarım Gün'])
+                        toplam_mesai_saati = pers_puantaj['fazla_mesai_saati'].sum()
+                        
+                        kesinti_tutari = (gelmedi_gun * gunluk_ucret) + (yarim_gun * (gunluk_ucret / 2))
+                        mesai_tutari = toplam_mesai_saati * mesai_saatlik_ucret
+                        net_odenecek = maas - kesinti_tutari + mesai_tutari
+                        
+                        hesap_listesi.append({
+                            "Personel": isim,
+                            "Kök Maaş": f"{maas:,.2f} ₺",
+                            "Kesinti Gün": f"{gelmedi_gun + (yarim_gun*0.5)} Gün",
+                            "Kesinti Tutarı": f"-{kesinti_tutari:,.2f} ₺",
+                            "Fazla Mesai": f"{toplam_mesai_saati} Saat",
+                            "Mesai Ücreti": f"+{mesai_tutari:,.2f} ₺",
+                            "Net Ödenecek": f"{net_odenecek:,.2f} ₺"
+                        })
+                
+                if hesap_listesi:
+                    st.dataframe(pd.DataFrame(hesap_listesi), hide_index=True, use_container_width=True)
+                else:
+                    st.warning("Bu ay için maaşı girilmiş ve işlem görmüş personel kaydı bulunamadı.")
+            else:
+                st.warning("Henüz puantaj kaydı veya personel bulunmuyor.")
+
 elif menu == "Raporlar":
     st.header("📊 Sistem Raporları ve Excel Çıktıları")
-    st.info("Bu sayfada işletmenize ait kritik verileri toplu halde görebilir ve Excel'e indirebilirsiniz.")
     
-    # 1. PLATFORM SATIŞLARI RAPORU
     st.subheader("1. Yemek Sepeti ve Trendyol Satış Raporu")
     sat = db_oku(supabase.table("platform_satis").select("*"))
     if sat: 
@@ -834,12 +884,9 @@ elif menu == "Raporlar":
         st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']], hide_index=True, use_container_width=True)
         dosya_sat, uzanti_sat, mime_sat = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
         st.download_button(label="📥 Platform Satışlarını Excel'e İndir", data=dosya_sat, file_name=f"Platform_Satislar_Raporu.{uzanti_sat}", mime=mime_sat)
-    else:
-        st.write("Kayıtlı platform satışı bulunmuyor.")
     
     st.divider()
     
-    # 2. DÜKKAN CİROSU RAPORU
     st.subheader("2. Günlük Dükkan Cirosu Raporu")
     cir = db_oku(supabase.table("ciro").select("*"))
     if cir: 
@@ -848,12 +895,9 @@ elif menu == "Raporlar":
         st.dataframe(df_cir[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
         dosya_cir, uzanti_cir, mime_cir = excel_indir(df_cir[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']])
         st.download_button(label="📥 Dükkan Cirosunu Excel'e İndir", data=dosya_cir, file_name=f"Dukkan_Cirosu_Raporu.{uzanti_cir}", mime=mime_cir)
-    else:
-        st.write("Kayıtlı ciro bulunmuyor.")
 
     st.divider()
 
-    # 3. MASRAFLAR RAPORU
     st.subheader("3. Tüm Masraflar Raporu")
     masraflar_r = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
     if masraflar_r:
@@ -862,5 +906,3 @@ elif menu == "Raporlar":
         st.dataframe(df_masraf_r[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']], hide_index=True, use_container_width=True)
         dosya_mas, uzanti_mas, mime_mas = excel_indir(df_masraf_r[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']])
         st.download_button(label="📥 Tüm Masrafları Excel'e İndir", data=dosya_mas, file_name=f"Masraflar_Raporu.{uzanti_mas}", mime=mime_mas)
-    else:
-        st.write("Kayıtlı masraf bulunmuyor.")
