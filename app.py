@@ -513,6 +513,7 @@ elif menu == "Banka & Kart Yönetimi":
         st.subheader("Hesap Bakiyeleri ve Kart Borçları")
         islemler_b = db_oku(supabase.table("banka_islemleri").select("*"))
         hesaplar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
+        
         if hesaplar_db and islemler_b:
             hesap_sozluk = {b['isim']: {'Tip': b['tip'], 'Bakiye (Eksi İse Borç)': 0.0} for b in hesaplar_db}
             for i in islemler_b:
@@ -531,7 +532,19 @@ elif menu == "Banka & Kart Yönetimi":
             
             st.divider()
             st.subheader("Tüm Banka ve Kart Hareketleri Dökümü")
-            df_islem_b = pd.DataFrame(islemler_b)
+            
+            # --- VİRMANLARI ÇİFT SATIR OLARAK GÖSTERME (İki bankada da görünsün) ---
+            banka_dokum = []
+            for i in islemler_b:
+                if i['islem_tipi'] in ["Bankalar Arası Virman", "Kredi Kartı Borç Ödemesi"]:
+                    banka_dokum.append({"id": i['id'], "tarih": i['tarih'], "hesap_adi": i['hesap_adi'], "islem_tipi": f"{i['islem_tipi']} (Çıkış)", "karsi_hesap": i['karsi_hesap'], "tutar": float(i['tutar']), "aciklama": i.get('aciklama', ''), "yon": "Çıkış"})
+                    if i.get('karsi_hesap'):
+                        banka_dokum.append({"id": i['id'], "tarih": i['tarih'], "hesap_adi": i['karsi_hesap'], "islem_tipi": f"{i['islem_tipi']} (Giriş)", "karsi_hesap": i['hesap_adi'], "tutar": float(i['tutar']), "aciklama": i.get('aciklama', ''), "yon": "Giriş"})
+                else:
+                    yon = "Çıkış" if "Çıkış" in i['islem_tipi'] else "Giriş"
+                    banka_dokum.append({"id": i['id'], "tarih": i['tarih'], "hesap_adi": i['hesap_adi'], "islem_tipi": i['islem_tipi'], "karsi_hesap": i.get('karsi_hesap', ''), "tutar": float(i['tutar']), "aciklama": i.get('aciklama', ''), "yon": yon})
+                    
+            df_islem_b = pd.DataFrame(banka_dokum)
             df_islem_b['tarih'] = pd.to_datetime(df_islem_b['tarih']).dt.date
             
             with st.expander("🔍 Banka İşlemlerini Filtrele", expanded=True):
@@ -548,10 +561,10 @@ elif menu == "Banka & Kart Yönetimi":
             if sec_islem_b: df_islem_b = df_islem_b[df_islem_b['islem_tipi'].isin(sec_islem_b)]
             if ara_b: df_islem_b = df_islem_b[df_islem_b['aciklama'].str.contains(ara_b, case=False, na=False)]
 
-            st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'yon', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
             st.info(f"📊 Ekranda filtrelenen toplam işlem sayısı: **{len(df_islem_b)}** | Toplam Tutar: **{df_islem_b['tutar'].sum():,.2f} ₺**")
             
-            dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']])
+            dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'yon', 'karsi_hesap', 'tutar', 'aciklama']])
             st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
 
     with tab4:
@@ -1133,6 +1146,77 @@ elif menu == "Kasa Yönetimi (Virman)":
         st.write(f"Bankaya Aktarılan: - {pavo_cikis:,.2f} ₺")
         st.metric("HAVUZDA BEKLEYEN BİRİKİM", f"{pavo_net:,.2f} ₺")
 
+    # --- YENİ EKLENEN KASA HAREKETLERİ DÖKÜMÜ ---
+    st.divider()
+    st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
+    
+    cirolar_all = db_oku(supabase.table("ciro").select("*"))
+    masraflar_all = db_oku(supabase.table("masraf").select("*"))
+    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
+    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
+    
+    kasa_dokum = []
+    
+    if cirolar_all:
+        for c in cirolar_all:
+            n_tutar = float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))
+            if n_tutar > 0:
+                kasa_dokum.append({"Tarih": c['tarih'], "Kasa": c.get('kasa'), "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": n_tutar, "Açıklama": "Günlük Nakit Ciro"})
+                
+    if masraflar_all:
+        for m in masraflar_all:
+            o_tipi = str(m.get('odeme_tipi', ''))
+            if o_tipi.startswith("Nakit - "):
+                k_adi = o_tipi.replace("Nakit - ", "")
+                kasa_dokum.append({"Tarih": m['tarih'], "Kasa": k_adi, "İşlem": "Masraf Çıkışı", "Yön": "Çıkış", "Tutar": float(m['tutar']), "Açıklama": m.get('aciklama', '')})
+                
+    if cari_islemler_all:
+        for co in cari_islemler_all:
+            o_tipi = str(co.get('odeme_tipi', ''))
+            if o_tipi.startswith("Nakit - "):
+                k_adi = o_tipi.replace("Nakit - ", "")
+                kasa_dokum.append({"Tarih": co['tarih'], "Kasa": k_adi, "İşlem": "Cari Ödemesi", "Yön": "Çıkış", "Tutar": float(co['tutar']), "Açıklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}"})
+                
+    if islemler_all:
+        for i in islemler_all:
+            tip = i.get('islem_tipi', '')
+            tut = float(i.get('tutar', 0))
+            g = i.get('gonderen')
+            a = i.get('alan')
+            
+            if tip in ['Açılış', 'Para Girişi (Sermaye)', 'Bankadan Çekilen']:
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "-"})
+            elif tip == 'Eksik':
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "Sayım Eksiği"})
+            elif tip == 'Fazla':
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "Sayım Fazlası"})
+            elif tip == 'Bankaya Yatırılan':
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "-"})
+            elif tip == 'Virman':
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": "Virman Çıkışı", "Yön": "Çıkış", "Tutar": tut, "Açıklama": f"Alıcı: {a}"})
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": "Virman Girişi", "Yön": "Giriş", "Tutar": tut, "Açıklama": f"Gönderen: {g}"})
+                
+    if kasa_dokum:
+        df_kd = pd.DataFrame(kasa_dokum)
+        df_kd['Tarih'] = pd.to_datetime(df_kd['Tarih']).dt.date
+        
+        with st.expander("🔍 Kasa Filtreleme Paneli", expanded=True):
+            f1, f2, f3 = st.columns(3)
+            with f1: tar_aralik_k = st.date_input("Tarih Aralığı", [df_kd['Tarih'].min(), df_kd['Tarih'].max()], key="kd_tar")
+            with f2: sec_kasa_k = st.multiselect("Kasa Seç", df_kd['Kasa'].unique().tolist(), key="kd_kasa")
+            with f3: sec_islem_k = st.multiselect("İşlem Tipi", df_kd['İşlem'].unique().tolist(), key="kd_islem")
+            
+        if len(tar_aralik_k) == 2: df_kd = df_kd[(df_kd['Tarih'] >= tar_aralik_k[0]) & (df_kd['Tarih'] <= tar_aralik_k[1])]
+        elif len(tar_aralik_k) == 1: df_kd = df_kd[df_kd['Tarih'] == tar_aralik_k[0]]
+        if sec_kasa_k: df_kd = df_kd[df_kd['Kasa'].isin(sec_kasa_k)]
+        if sec_islem_k: df_kd = df_kd[df_kd['İşlem'].isin(sec_islem_k)]
+        
+        st.dataframe(df_kd.sort_values("Tarih", ascending=False), hide_index=True, use_container_width=True)
+        dosya_kd, uz_kd, mi_kd = excel_indir(df_kd)
+        st.download_button("📥 Kasa Dökümünü Excel'e İndir", data=dosya_kd, file_name=f"Kasa_Hareketleri.{uz_kd}", mime=mi_kd, key="dl_kasa")
+    else:
+        st.info("Kayıtlı kasa hareketi bulunmuyor.")
+
 # --- PERSONEL MODÜLÜ ---
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
@@ -1304,7 +1388,6 @@ elif menu == "Personel & Puantaj":
 
     with tab4:
         st.subheader("Aylık Maaş ve Mesai Hesaplama")
-        st.info("💡 **Bilgi:** Maaş kesinti üzerinden değil; geldiği ve hak ettiği günler üzerinden hesaplanır (SGK Standartları). Tam Gün, Haftalık İzin ve Yıllık İzin = **1 Gün**. Yarım Gün = **0.5 Gün**.")
         
         aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
         col1, col2 = st.columns(2)
