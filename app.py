@@ -235,7 +235,7 @@ if st.sidebar.button("Çıkış Yap"):
     st.session_state.giris_yapildi = False
     st.rerun()
 
-# --- PLATFORM FONKSİYONU (SADECE BURADA TANIMLI) ---
+# --- PLATFORM FONKSİYONU ---
 def platform_sayfasi(platform_adi):
     st.header(f"📦 {platform_adi} Yönetimi")
     tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret"])
@@ -365,8 +365,7 @@ def platform_sayfasi(platform_adi):
                 st.success("Ayarlar güncellendi!")
                 st.rerun()
 
-# --- MENÜ İÇERİKLERİ (TEK SEFERLİK) ---
-
+# --- MENÜLER ---
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     if "ciro_msg" in st.session_state:
@@ -422,15 +421,12 @@ if menu == "Günlük Dükkan Cirosu":
         df_ciro = pd.DataFrame(cirolar)
         st.dataframe(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
 
-elif menu == "Yemek Sepeti Yönetimi":
-    platform_sayfasi("Yemek Sepeti")
-
-elif menu == "Trendyol Yönetimi":
-    platform_sayfasi("Trendyol")
+elif menu == "Yemek Sepeti Yönetimi": platform_sayfasi("Yemek Sepeti")
+elif menu == "Trendyol Yönetimi": platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
-    tab1, tab2, tab4, tab3 = st.tabs(["💵 İşlem Girişi", "📊 Bakiye ve Ekstre", "📂 Excel İçe Aktar", "⚙️ Hesap / Kart Ekle"])
+    tab1, tab2, tab4, tab3 = st.tabs(["💵 İşlem Girişi", "📊 Bakiye ve Filtreli Ekstre", "📂 Excel İçe Aktar", "⚙️ Hesap / Kart Ekle"])
     
     with tab3:
         st.subheader("Sisteme Yeni Banka veya Kart Ekle")
@@ -517,6 +513,7 @@ elif menu == "Banka & Kart Yönetimi":
         st.subheader("Hesap Bakiyeleri ve Kart Borçları")
         islemler_b = db_oku(supabase.table("banka_islemleri").select("*"))
         hesaplar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
+        
         if hesaplar_db and islemler_b:
             hesap_sozluk = {b['isim']: {'Tip': b['tip'], 'Bakiye (Eksi İse Borç)': 0.0} for b in hesaplar_db}
             for i in islemler_b:
@@ -532,9 +529,36 @@ elif menu == "Banka & Kart Yönetimi":
                     elif tip == "Kredi Kartı Borç Ödemesi": hesap_sozluk[kh]['Bakiye (Eksi İse Borç)'] += tut 
             df_bakiye = pd.DataFrame.from_dict(hesap_sozluk, orient='index').reset_index().rename(columns={'index': 'Hesap / Kart Adı'})
             st.dataframe(df_bakiye, hide_index=True, use_container_width=True)
+            
             st.divider()
             st.subheader("Tüm Banka ve Kart Hareketleri Dökümü")
-            st.dataframe(pd.DataFrame(islemler_b)[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            
+            df_islem_b = pd.DataFrame(islemler_b)
+            df_islem_b['tarih'] = pd.to_datetime(df_islem_b['tarih']).dt.date
+            
+            with st.expander("🔍 Banka İşlemlerini Filtrele", expanded=True):
+                c1, c2, c3, c4 = st.columns(4)
+                with c1: 
+                    t_aralik_b = st.date_input("Tarih Aralığı", [df_islem_b['tarih'].min(), df_islem_b['tarih'].max()], key="filt_b_tar")
+                with c2: 
+                    sec_hesap = st.multiselect("Hesap / Kart Seç", df_islem_b['hesap_adi'].unique().tolist(), key="filt_b_hesap")
+                with c3: 
+                    sec_islem_b = st.multiselect("İşlem Tipi", df_islem_b['islem_tipi'].unique().tolist(), key="filt_b_tip")
+                with c4: 
+                    ara_b = st.text_input("Açıklama Ara", key="filt_b_ara")
+            
+            if len(t_aralik_b) == 2: df_islem_b = df_islem_b[(df_islem_b['tarih'] >= t_aralik_b[0]) & (df_islem_b['tarih'] <= t_aralik_b[1])]
+            elif len(t_aralik_b) == 1: df_islem_b = df_islem_b[df_islem_b['tarih'] == t_aralik_b[0]]
+            
+            if sec_hesap: df_islem_b = df_islem_b[df_islem_b['hesap_adi'].isin(sec_hesap)]
+            if sec_islem_b: df_islem_b = df_islem_b[df_islem_b['islem_tipi'].isin(sec_islem_b)]
+            if ara_b: df_islem_b = df_islem_b[df_islem_b['aciklama'].str.contains(ara_b, case=False, na=False)]
+
+            st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            st.info(f"📊 Ekranda filtrelenen toplam işlem sayısı: **{len(df_islem_b)}** | Toplam Tutar: **{df_islem_b['tutar'].sum():,.2f} ₺**")
+            
+            dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']])
+            st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
 
     with tab4:
         st.subheader("📂 Banka Ekstresi (Excel) İçe Aktar ve Öğret")
@@ -851,10 +875,29 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
             bakiye_df = pd.DataFrame({'Toplam Fatura Tutarı': fatura_toplam, 'Ödenen Tutar': odeme_toplam}).fillna(0)
             bakiye_df['KALAN BORCUMUZ'] = bakiye_df['Toplam Fatura Tutarı'] - bakiye_df['Ödenen Tutar']
             st.dataframe(bakiye_df.reset_index(), hide_index=True, use_container_width=True)
+            
             st.divider()
             st.subheader("Tüm Cari Hareketler Dökümü")
             df_i['odeme_tipi'] = df_i.get('odeme_tipi', '- Yok -')
+            df_i['tarih'] = pd.to_datetime(df_i['tarih']).dt.date
+            
+            with st.expander("🔍 Cari Filtreleme Paneli", expanded=True):
+                c1, c2, c3, c4 = st.columns(4)
+                with c1: t_aralik_c = st.date_input("Tarih Aralığı", [df_i['tarih'].min(), df_i['tarih'].max()], key="filt_c_tar")
+                with c2: sec_cari = st.multiselect("Cari (Firma) Seç", df_i['cari_adi'].unique().tolist(), key="filt_c_cari")
+                with c3: sec_tip_c = st.multiselect("İşlem Tipi", df_i['islem_tipi'].unique().tolist(), key="filt_c_tip")
+                with c4: ara_c = st.text_input("Açıklama Ara", key="filt_c_ara")
+                
+            if len(t_aralik_c) == 2: df_i = df_i[(df_i['tarih'] >= t_aralik_c[0]) & (df_i['tarih'] <= t_aralik_c[1])]
+            elif len(t_aralik_c) == 1: df_i = df_i[df_i['tarih'] == t_aralik_c[0]]
+            if sec_cari: df_i = df_i[df_i['cari_adi'].isin(sec_cari)]
+            if sec_tip_c: df_i = df_i[df_i['islem_tipi'].isin(sec_tip_c)]
+            if ara_c: df_i = df_i[df_i['aciklama'].str.contains(ara_c, case=False, na=False)]
+            
             st.dataframe(df_i[['tarih', 'cari_adi', 'islem_tipi', 'tutar', 'odeme_tipi', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            
+            dosya_c, uzanti_c, mime_c = excel_indir(df_i[['tarih', 'cari_adi', 'islem_tipi', 'tutar', 'odeme_tipi', 'aciklama']])
+            st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_c, file_name=f"Cari_Hareketleri.{uzanti_c}", mime=mime_c, key="dl_cari")
 
 elif menu == "Kasa Yönetimi (Virman)":
     st.header("Kasa Yönetimi ve Virman")
@@ -968,7 +1011,7 @@ elif menu == "Kasa Yönetimi (Virman)":
                     with c_gun:
                         if st.form_submit_button("Güncelle"):
                             if y_islem == "Virman": veri = {"tarih": str(y_tar), "islem_tipi": y_islem, "gonderen": y_gon, "alan": y_aln, "tutar": y_tutar}
-                            elif y_islem in ["Eksik", "Bankaya Yatırılan"]: veri = {"tarih": str(y_tar), "islem_tipi": y_islem, "gonderen": y_gon, "alan": None, "tutar": y_tutar}
+                            elif y_islem == "Eksik": veri = {"tarih": str(y_tar), "islem_tipi": y_islem, "gonderen": y_gon, "alan": None, "tutar": y_tutar}
                             elif y_islem in ["Fazla", "Para Girişi (Sermaye)", "Bankadan Çekilen"]: veri = {"tarih": str(y_tar), "islem_tipi": y_islem, "gonderen": None, "alan": y_aln, "tutar": y_tutar}
                             db_yaz(supabase.table("kasa_islemleri").update(veri).eq("id", sec_k['id']))
                             st.success("İşlem güncellendi!")
