@@ -39,6 +39,24 @@ def db_yaz(sorgu):
         st.error(f"⚠️ İşlem Başarısız Oldu. Hata Detayı: {e}")
         return False
 
+# --- MERKEZİ BİLDİRİM SİSTEMİ ---
+def bildirim_goster():
+    if "genel_mesaj" in st.session_state:
+        tur, metin = st.session_state["genel_mesaj"]
+        if tur == "success":
+            st.success(metin)
+            st.toast(metin, icon="✅")
+        elif tur == "error":
+            st.error(metin)
+            st.toast(metin, icon="❌")
+        elif tur == "warning":
+            st.warning(metin)
+            st.toast(metin, icon="⚠️")
+        elif tur == "info":
+            st.info(metin)
+            st.toast(metin, icon="ℹ️")
+        del st.session_state["genel_mesaj"]
+
 # --- CALLBACK FONKSİYONLARI ---
 def platform_kaydet_cb(plat_adi):
     tarih = st.session_state[f"{plat_adi}_tarih"]
@@ -46,12 +64,12 @@ def platform_kaydet_cb(plat_adi):
     kapida = st.session_state[f"{plat_adi}_kap"]
     
     if online <= 0 and kapida <= 0:
-        st.session_state[f"{plat_adi}_msg"] = ("warning", "Lütfen en az bir tutar girin.")
+        st.session_state["genel_mesaj"] = ("warning", "Lütfen en az bir tutar girin.")
         return
 
     mevcut = db_oku(supabase.table("platform_satis").select("id").eq("platform", plat_adi).eq("tarih", str(tarih)))
     if mevcut:
-        st.session_state[f"{plat_adi}_msg"] = ("error", f"⚠️ {tarih} tarihi için {plat_adi} satışı zaten girilmiş! Değiştirmek için Düzenle panelini kullanın.")
+        st.session_state["genel_mesaj"] = ("error", f"⚠️ {tarih} tarihi için {plat_adi} satışı zaten girilmiş! Değiştirmek için Düzenle panelini kullanın.")
         return
 
     hata = False
@@ -74,10 +92,10 @@ def platform_kaydet_cb(plat_adi):
                 if not db_yaz(supabase.table("platform_satis").insert(veri)):
                     hata = True
             else:
-                st.session_state[f"{plat_adi}_msg"] = ("error", f"⚠️ Lütfen önce Ayarlar'dan '{o_tip}' için oranları kaydedin!")
+                st.session_state["genel_mesaj"] = ("error", f"⚠️ Lütfen önce Ayarlar'dan '{o_tip}' için oranları kaydedin!")
                 return
     if not hata:
-        st.session_state[f"{plat_adi}_msg"] = ("success", f"{plat_adi} satışları başarıyla kaydedildi!")
+        st.session_state["genel_mesaj"] = ("success", f"{plat_adi} satışları başarıyla kaydedildi!")
         st.session_state[f"{plat_adi}_on"] = 0.0
         st.session_state[f"{plat_adi}_kap"] = 0.0
 
@@ -92,12 +110,12 @@ def ciro_kaydet_cb():
     
     mevcut = db_oku(supabase.table("ciro").select("id").eq("tarih", str(tarih)))
     if mevcut:
-        st.session_state["ciro_msg"] = ("error", f"⚠️ {tarih} tarihi için Dükkan Cirosu zaten girilmiş! Düzenlemek için paneli kullanın.")
+        st.session_state["genel_mesaj"] = ("error", f"⚠️ {tarih} tarihi için Dükkan Cirosu zaten girilmiş! Düzenlemek için paneli kullanın.")
         return
         
     veri = {"tarih": str(tarih), "kasa": kasa, "nakit": nakit, "kredi_karti": kredi, "pavo_nakit": pavo_n, "pavo_kredi": pavo_k, "odenmez": odenmez}
     if db_yaz(supabase.table("ciro").insert(veri)):
-        st.session_state["ciro_msg"] = ("success", "Dükkan Cirosu başarıyla kaydedildi!")
+        st.session_state["genel_mesaj"] = ("success", "Dükkan Cirosu başarıyla kaydedildi!")
         st.session_state["ciro_nakit"] = 0.0
         st.session_state["ciro_kredi"] = 0.0
         st.session_state["ciro_pavo_n"] = 0.0
@@ -112,7 +130,7 @@ def puantaj_kaydet_cb():
     
     mevcut = db_oku(supabase.table("puantaj").select("id").eq("personel_adi", isim).eq("tarih", str(tarih)))
     if mevcut:
-        st.session_state["puantaj_msg"] = ("error", f"⚠️ {tarih} tarihinde {isim} için zaten giriş yapılmış!")
+        st.session_state["genel_mesaj"] = ("error", f"⚠️ {tarih} tarihinde {isim} için zaten giriş yapılmış!")
         return
 
     if durum == "Haftalık İzin":
@@ -120,7 +138,7 @@ def puantaj_kaydet_cb():
         h_bitis = h_baslangic + datetime.timedelta(days=6)
         sorgu = supabase.table("puantaj").select("id").eq("personel_adi", isim).eq("durum", "Haftalık İzin").gte("tarih", str(h_baslangic)).lte("tarih", str(h_bitis))
         if db_oku(sorgu):
-            st.session_state["puantaj_msg"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: {isim} bu hafta içinde zaten Haftalık İzin kullanmış!")
+            st.session_state["genel_mesaj"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: {isim} bu hafta içinde zaten Haftalık İzin kullanmış!")
             return
 
     if durum == "Yıllık İzin":
@@ -128,12 +146,12 @@ def puantaj_kaydet_cb():
         izin_hakki = float(personel_bilgi[0].get('yillik_izin_hakki', 0)) if personel_bilgi else 0
         kullanilan_izinler = db_oku(supabase.table("puantaj").select("id").eq("personel_adi", isim).eq("durum", "Yıllık İzin"))
         if len(kullanilan_izinler) >= izin_hakki:
-            st.session_state["puantaj_msg"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: Yıllık İzin hakkı kalmamıştır!")
+            st.session_state["genel_mesaj"] = ("error", f"⚠️ İŞLEM REDDEDİLDİ: Yıllık İzin hakkı kalmamıştır!")
             return
         
     veri = {"tarih": str(tarih), "personel_adi": isim, "durum": durum, "fazla_mesai_saati": mesai}
     if db_yaz(supabase.table("puantaj").insert(veri)):
-        st.session_state["puantaj_msg"] = ("success", f"{isim} için puantaj kaydedildi!")
+        st.session_state["genel_mesaj"] = ("success", f"{isim} için puantaj kaydedildi!")
         st.session_state["puantaj_mesai"] = 0.0
         st.session_state["puantaj_durum"] = "Tam Gün"
 
@@ -145,7 +163,7 @@ def masraf_kaydet_cb():
     odeme = st.session_state["masraf_odeme"]
     
     if not aciklama or tutar <= 0:
-        st.session_state["masraf_msg"] = ("warning", "Lütfen açıklama ve tutar girin.")
+        st.session_state["genel_mesaj"] = ("warning", "Lütfen açıklama ve tutar girin.")
         return
         
     veri = {"tarih": str(tarih), "masraf_tipi": tip, "aciklama": aciklama, "tutar": tutar, "odeme_tipi": odeme}
@@ -156,12 +174,12 @@ def masraf_kaydet_cb():
         if odeme.startswith("Cari - "):
             cari_adi = odeme.replace("Cari - ", "")
             db_yaz(supabase.table("cari_islemler").insert({"tarih": str(tarih), "cari_adi": cari_adi, "islem_tipi": "Gelen Fatura (Bize Borç Yazar)", "tutar": tutar, "aciklama": f"Masraf: {aciklama}", "odeme_tipi": "- Yok -"}))
-            st.session_state["masraf_msg"] = ("success", f"Masraf kaydedildi ve {cari_adi} hesabına borç işlendi!")
+            st.session_state["genel_mesaj"] = ("success", f"Masraf kaydedildi ve {cari_adi} hesabına borç işlendi!")
         elif odeme in banka_liste:
             db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(tarih), "hesap_adi": odeme, "islem_tipi": "Para Çıkışı (Masraf)", "tutar": tutar, "aciklama": f"Masraf: {aciklama}"}))
-            st.session_state["masraf_msg"] = ("success", f"Masraf kaydedildi ve {odeme} hesabından düşüldü!")
+            st.session_state["genel_mesaj"] = ("success", f"Masraf kaydedildi ve {odeme} hesabından düşüldü!")
         else:
-            st.session_state["masraf_msg"] = ("success", "Masraf başarıyla kaydedildi!")
+            st.session_state["genel_mesaj"] = ("success", "Masraf başarıyla kaydedildi!")
             
         st.session_state["masraf_aciklama"] = ""
         st.session_state["masraf_tutar"] = 0.0
@@ -175,11 +193,11 @@ def cari_islem_kaydet_cb():
     odeme = st.session_state.get("cari_islem_odeme", "- Yok -")
     
     if tutar <= 0:
-        st.session_state["cari_msg"] = ("warning", "Lütfen 0'dan büyük bir tutar girin.")
+        st.session_state["genel_mesaj"] = ("warning", "Lütfen 0'dan büyük bir tutar girin.")
         return
 
     if islem == "Ödeme Yaptık (Borç Düşer)" and odeme == "- Yok -":
-        st.session_state["cari_msg"] = ("warning", "Lütfen ödemenin nereden yapıldığını seçin!")
+        st.session_state["genel_mesaj"] = ("warning", "Lütfen ödemenin nereden yapıldığını seçin!")
         return
         
     veri = {"tarih": str(tarih), "cari_adi": cari, "islem_tipi": islem, "tutar": tutar, "aciklama": aciklama, "odeme_tipi": odeme if islem == "Ödeme Yaptık (Borç Düşer)" else "- Yok -"}
@@ -193,7 +211,7 @@ def cari_islem_kaydet_cb():
                 "tarih": str(tarih), "hesap_adi": odeme, "islem_tipi": "Para Çıkışı", "karsi_hesap": cari, "tutar": tutar, "aciklama": f"Cari Ödemesi: {aciklama}"
             }))
             
-        st.session_state["cari_msg"] = ("success", f"{cari} firması için {islem} kaydedildi!")
+        st.session_state["genel_mesaj"] = ("success", f"{cari} firması için {islem} kaydedildi!")
         st.session_state["cari_islem_tutar"] = 0.0
         st.session_state["cari_islem_aciklama"] = ""
 
@@ -238,17 +256,11 @@ if st.sidebar.button("Çıkış Yap"):
 # --- PLATFORM FONKSİYONU ---
 def platform_sayfasi(platform_adi):
     st.header(f"📦 {platform_adi} Yönetimi")
+    bildirim_goster()
     tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret"])
     
     with tab1:
         st.subheader("Satışları Gir")
-        if f"{platform_adi}_msg" in st.session_state:
-            m_type, m_text = st.session_state[f"{platform_adi}_msg"]
-            if m_type == "success": st.success(m_text)
-            elif m_type == "error": st.error(m_text)
-            elif m_type == "warning": st.warning(m_text)
-            del st.session_state[f"{platform_adi}_msg"]
-            
         st.date_input("Satış Tarihi", datetime.date.today(), key=f"{platform_adi}_tarih")
         col1, col2 = st.columns(2)
         with col1: st.number_input("Online Ödeme Cirosu (₺)", min_value=0.0, key=f"{platform_adi}_on")
@@ -284,13 +296,13 @@ def platform_sayfasi(platform_adi):
                                     t_tarihi = y_ps_tarih + datetime.timedelta(days=int(ayar['vade']))
                                     guncel_veri = {"tarih": str(y_ps_tarih), "odeme_tipi": y_ps_odeme, "brut": y_ps_brut, "komisyon_tutari": k_tutari, "stopaj_tutari": s_tutari, "kesinti": kes, "net": net_t, "tahsilat_tarihi": str(t_tarihi)}
                                     if db_yaz(supabase.table("platform_satis").update(guncel_veri).eq("id", secilen_ps['id'])):
-                                        st.success("Kayıt güncellendi!")
+                                        st.session_state.genel_mesaj = ("success", "Satış kaydı güncellendi!")
                                         st.rerun()
                                 else: st.error("Önce ayarları yapın.")
                         with c_sil:
                             if st.form_submit_button("🗑️ Sil"):
                                 if db_yaz(supabase.table("platform_satis").delete().eq("id", secilen_ps['id'])):
-                                    st.warning("Silindi!")
+                                    st.session_state.genel_mesaj = ("info", "Satış kaydı silindi!")
                                     st.rerun()
 
     with tab2:
@@ -335,7 +347,7 @@ def platform_sayfasi(platform_adi):
                             db_yaz(supabase.table("banka_islemleri").insert({
                                 "tarih": str(tahsilat_tarihi), "hesap_adi": secilen_banka, "islem_tipi": "Para Girişi", "tutar": toplam_net, "aciklama": f"{platform_adi} Tahsilatı"
                             }))
-                        st.success("Tahsilat aktarıldı!")
+                        st.session_state.genel_mesaj = ("success", "Tahsilat aktarıldı!")
                         st.rerun()
         else:
             st.success("Bekleyen alacağınız bulunmuyor.")
@@ -357,23 +369,19 @@ def platform_sayfasi(platform_adi):
             y_k_stop = st.number_input("Kapıda Stopaj (%)", value=0.0)
             y_k_vade = st.number_input("Kapıda Vade", value=1, step=1)
             if st.form_submit_button("Ayarları Kaydet"):
-                db_yaz(supabase.table("ayarlar").delete().eq("platform", platform_adi))
-                db_yaz(supabase.table("ayarlar").insert([
-                    {"platform": platform_adi, "odeme_tipi": "Online", "komisyon": y_o_kom, "stopaj": y_o_stop, "vade": y_o_vade},
-                    {"platform": platform_adi, "odeme_tipi": "Kapıda Ödeme", "komisyon": y_k_kom, "stopaj": y_k_stop, "vade": y_k_vade}
-                ]))
-                st.success("Ayarlar güncellendi!")
-                st.rerun()
+                if db_yaz(supabase.table("ayarlar").delete().eq("platform", platform_adi)):
+                    db_yaz(supabase.table("ayarlar").insert([
+                        {"platform": platform_adi, "odeme_tipi": "Online", "komisyon": y_o_kom, "stopaj": y_o_stop, "vade": y_o_vade},
+                        {"platform": platform_adi, "odeme_tipi": "Kapıda Ödeme", "komisyon": y_k_kom, "stopaj": y_k_stop, "vade": y_k_vade}
+                    ]))
+                    st.session_state.genel_mesaj = ("success", "Ayarlar güncellendi!")
+                    st.rerun()
 
 # --- MENÜLER ---
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
-    if "ciro_msg" in st.session_state:
-        m_type, m_text = st.session_state["ciro_msg"]
-        if m_type == "success": st.success(m_text)
-        elif m_type == "error": st.error(m_text)
-        del st.session_state["ciro_msg"]
-        
+    bildirim_goster()
+    
     c1, c2 = st.columns(2)
     with c1:
         st.date_input("Tarih", datetime.date.today(), key="ciro_tarih")
@@ -408,11 +416,13 @@ if menu == "Günlük Dükkan Cirosu":
                     c_gun, c_sil = st.columns(2)
                     with c_gun:
                         if st.form_submit_button("Güncelle"):
-                            db_yaz(supabase.table("ciro").update({"tarih": str(y_c_tarih), "kasa": y_kasa, "nakit": y_nakit, "kredi_karti": y_kredi, "pavo_nakit": y_pavo_n, "pavo_kredi": y_pavo_k, "odenmez": y_odenmez}).eq("id", secilen_c['id']))
+                            if db_yaz(supabase.table("ciro").update({"tarih": str(y_c_tarih), "kasa": y_kasa, "nakit": y_nakit, "kredi_karti": y_kredi, "pavo_nakit": y_pavo_n, "pavo_kredi": y_pavo_k, "odenmez": y_odenmez}).eq("id", secilen_c['id'])):
+                                st.session_state.genel_mesaj = ("success", "Ciro güncellendi!")
                             st.rerun()
                     with c_sil:
                         if st.form_submit_button("Sil"):
-                            db_yaz(supabase.table("ciro").delete().eq("id", secilen_c['id']))
+                            if db_yaz(supabase.table("ciro").delete().eq("id", secilen_c['id'])):
+                                st.session_state.genel_mesaj = ("info", "Ciro kaydı silindi!")
                             st.rerun()
 
     st.subheader("📋 Geçmiş Ciro Kayıtları")
@@ -426,6 +436,7 @@ elif menu == "Trendyol Yönetimi": platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
+    bildirim_goster()
     tab1, tab2, tab4, tab3 = st.tabs(["💵 İşlem Girişi", "📊 Bakiye ve Filtreli Ekstre", "📂 Excel İçe Aktar", "⚙️ Hesap / Kart Ekle"])
     
     with tab3:
@@ -435,8 +446,8 @@ elif menu == "Banka & Kart Yönetimi":
             b_tip = st.selectbox("Türü", ["Banka Hesabı", "Kredi Kartı"])
             if st.form_submit_button("Ekle"):
                 if b_isim.strip():
-                    db_yaz(supabase.table("banka_hesaplari").insert({"isim": b_isim.strip(), "tip": b_tip}))
-                    st.success("Hesap eklendi!")
+                    if db_yaz(supabase.table("banka_hesaplari").insert({"isim": b_isim.strip(), "tip": b_tip})):
+                        st.session_state.genel_mesaj = ("success", "Hesap başarıyla eklendi!")
                     st.rerun()
         st.divider()
         bankalar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
@@ -453,10 +464,12 @@ elif menu == "Banka & Kart Yönetimi":
                                 db_yaz(supabase.table("banka_hesaplari").update({"isim": y_isim}).eq("id", sec_b['id']))
                                 db_yaz(supabase.table("banka_islemleri").update({"hesap_adi": y_isim}).eq("hesap_adi", sec_b['isim']))
                                 db_yaz(supabase.table("banka_islemleri").update({"karsi_hesap": y_isim}).eq("karsi_hesap", sec_b['isim']))
+                                st.session_state.genel_mesaj = ("success", "Hesap adı güncellendi!")
                                 st.rerun()
                         with c_s:
                             if st.form_submit_button("Sil"):
-                                db_yaz(supabase.table("banka_hesaplari").delete().eq("id", sec_b['id']))
+                                if db_yaz(supabase.table("banka_hesaplari").delete().eq("id", sec_b['id'])):
+                                    st.session_state.genel_mesaj = ("info", "Hesap sistemden silindi!")
                                 st.rerun()
 
     with tab1:
@@ -482,8 +495,8 @@ elif menu == "Banka & Kart Yönetimi":
                 if b_tutar > 0:
                     veri = {"tarih": str(b_tarih), "hesap_adi": st.session_state.b_hesap, "islem_tipi": b_tip, "tutar": b_tutar, "aciklama": b_ack}
                     if b_karsi: veri["karsi_hesap"] = b_karsi
-                    db_yaz(supabase.table("banka_islemleri").insert(veri))
-                    st.success("İşlem kaydedildi!")
+                    if db_yaz(supabase.table("banka_islemleri").insert(veri)):
+                        st.session_state.genel_mesaj = ("success", "Banka işlemi başarıyla kaydedildi!")
                     st.rerun()
                 else: st.warning("Tutar 0'dan büyük olmalıdır.")
                     
@@ -502,11 +515,13 @@ elif menu == "Banka & Kart Yönetimi":
                             cg, cs = st.columns(2)
                             with cg:
                                 if st.form_submit_button("Güncelle"):
-                                    db_yaz(supabase.table("banka_islemleri").update({"tarih": str(y_b_tarih), "tutar": y_b_tutar, "aciklama": y_b_ack}).eq("id", sec_bi['id']))
+                                    if db_yaz(supabase.table("banka_islemleri").update({"tarih": str(y_b_tarih), "tutar": y_b_tutar, "aciklama": y_b_ack}).eq("id", sec_bi['id'])):
+                                        st.session_state.genel_mesaj = ("success", "Banka işlemi güncellendi!")
                                     st.rerun()
                             with cs:
                                 if st.form_submit_button("Sil"):
-                                    db_yaz(supabase.table("banka_islemleri").delete().eq("id", sec_bi['id']))
+                                    if db_yaz(supabase.table("banka_islemleri").delete().eq("id", sec_bi['id'])):
+                                        st.session_state.genel_mesaj = ("info", "Banka işlemi silindi!")
                                     st.rerun()
 
     with tab2:
@@ -533,7 +548,6 @@ elif menu == "Banka & Kart Yönetimi":
             st.divider()
             st.subheader("Tüm Banka ve Kart Hareketleri Dökümü")
             
-            # --- VİRMANLARI ÇİFT SATIR OLARAK GÖSTERME (İki bankada da görünsün) ---
             banka_dokum = []
             for i in islemler_b:
                 if i['islem_tipi'] in ["Bankalar Arası Virman", "Kredi Kartı Borç Ödemesi"]:
@@ -583,7 +597,8 @@ elif menu == "Banka & Kart Yönetimi":
                 k_hedef = st.selectbox("Hedef / Alt Kategori (Sadece Masraf ve Cari İçin)", ["- Yok -"] + masraf_tipleri + cari_liste)
                 if st.form_submit_button("Kuralı Öğret"):
                     if k_kelime.strip():
-                        db_yaz(supabase.table("banka_kurallari").insert({"kelime": k_kelime.strip(), "islem_tipi": k_islem, "hedef": k_hedef}))
+                        if db_yaz(supabase.table("banka_kurallari").insert({"kelime": k_kelime.strip(), "islem_tipi": k_islem, "hedef": k_hedef})):
+                            st.session_state.genel_mesaj = ("success", "Kural başarıyla öğretildi!")
                         st.rerun()
                         
             st.divider()
@@ -594,7 +609,8 @@ elif menu == "Banka & Kart Yönetimi":
                     with col1: st.write(f"Kelime: **{k['kelime']}** ➡️ İşlem: **{k['islem_tipi']}** | Hedef: **{k['hedef']}**")
                     with col2:
                         if st.button("Sil", key=f"del_k_{k['id']}"):
-                            db_yaz(supabase.table("banka_kurallari").delete().eq("id", k['id']))
+                            if db_yaz(supabase.table("banka_kurallari").delete().eq("id", k['id'])):
+                                st.session_state.genel_mesaj = ("info", "Kural silindi!")
                             st.rerun()
 
         with alt_tab1:
@@ -663,6 +679,7 @@ elif menu == "Banka & Kart Yönetimi":
                     
                     if st.button("✅ Seçili İşlemleri Sisteme Kaydet", type="primary"):
                         secilen_rows = edited_df[edited_df['İşle'] == True]
+                        basarili = 0
                         for idx, r in secilen_rows.iterrows():
                             tip = r['İşlem Tipi']
                             tar = r['Tarih']
@@ -678,12 +695,16 @@ elif menu == "Banka & Kart Yönetimi":
                                 db_yaz(supabase.table("banka_islemleri").insert({"tarih": tar, "hesap_adi": h_secim, "islem_tipi": "Para Çıkışı", "karsi_hesap": hedef, "tutar": tut, "aciklama": f"Cari Ödemesi: {ack}"}))
                             else:
                                 db_yaz(supabase.table("banka_islemleri").insert({"tarih": tar, "hesap_adi": h_secim, "islem_tipi": tip, "tutar": tut, "aciklama": ack}))
+                            
+                            basarili += 1
                                 
                         del st.session_state['excel_preview']
+                        st.session_state.genel_mesaj = ("success", f"{basarili} işlem başarıyla kaydedildi!")
                         st.rerun()
 
 elif menu == "Masraf Girişi":
     st.header("Masraf Girişi")
+    bildirim_goster()
     tipler_db = db_oku(supabase.table("masraf_tipleri").select("*"))
     tipler = [t['tip_adi'] for t in tipler_db] if tipler_db else ["Genel Masraf"]
 
@@ -692,15 +713,10 @@ elif menu == "Masraf Girişi":
             yeni_tip = st.text_input("Masraf Tipi Adı")
             if st.form_submit_button("Ekle"):
                 if yeni_tip.strip():
-                    db_yaz(supabase.table("masraf_tipleri").insert({"tip_adi": yeni_tip.strip()}))
+                    if db_yaz(supabase.table("masraf_tipleri").insert({"tip_adi": yeni_tip.strip()})):
+                        st.session_state.genel_mesaj = ("success", "Masraf Tipi eklendi!")
                     st.rerun()
     st.divider()
-
-    if "masraf_msg" in st.session_state:
-        m_type, m_text = st.session_state["masraf_msg"]
-        if m_type == "success": st.success(m_text)
-        elif m_type == "warning": st.warning(m_text)
-        del st.session_state["masraf_msg"]
         
     bankalar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
     banka_liste = [b['isim'] for b in bankalar_db] if bankalar_db else []
@@ -755,6 +771,8 @@ elif menu == "Masraf Girişi":
                                 db_yaz(supabase.table("cari_islemler").insert({"tarih": str(y_tarih), "cari_adi": yeni_c_adi, "islem_tipi": "Gelen Fatura (Bize Borç Yazar)", "tutar": y_tutar, "aciklama": f"Masraf: {y_aciklama}"}))
                             elif y_odeme_y in banka_liste:
                                 db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(y_tarih), "hesap_adi": y_odeme_y, "islem_tipi": "Para Çıkışı (Masraf)", "tutar": y_tutar, "aciklama": f"Masraf: {y_aciklama}"}))
+                            
+                            st.session_state.genel_mesaj = ("success", "Masraf güncellendi!")
                             st.rerun()
                     with c_sil:
                         if st.form_submit_button("Sil"):
@@ -764,6 +782,7 @@ elif menu == "Masraf Girişi":
                                     db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", sil_c_adi).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("aciklama", f"Masraf: {secilen_m['aciklama']}"))
                                 elif secilen_m['odeme_tipi'] in banka_liste:
                                     db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("islem_tipi", "Para Çıkışı (Masraf)"))
+                                st.session_state.genel_mesaj = ("info", "Masraf silindi!")
                                 st.rerun()
 
     st.subheader("📋 Masraf Kayıtları ve Filtreleme")
@@ -788,6 +807,7 @@ elif menu == "Masraf Girişi":
 
 elif menu == "Cari (Tedarikçi) Yönetimi":
     st.header("🏢 Cari (Tedarikçi) Yönetimi")
+    bildirim_goster()
     tab1, tab2, tab3 = st.tabs(["📈 Fatura & Ödeme Girişi", "📋 Cari Ekstre", "⚙️ Tedarikçi Ekle"])
     
     with tab3:
@@ -795,7 +815,8 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
             yeni_cari = st.text_input("Tedarikçi Firma / Kişi Adı")
             if st.form_submit_button("Ekle"):
                 if yeni_cari.strip():
-                    db_yaz(supabase.table("cariler").insert({"isim": yeni_cari.strip()}))
+                    if db_yaz(supabase.table("cariler").insert({"isim": yeni_cari.strip()})):
+                        st.session_state.genel_mesaj = ("success", "Cari eklendi!")
                     st.rerun()
         st.divider()
         cariler_db = db_oku(supabase.table("cariler").select("*"))
@@ -811,20 +832,17 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                             if st.form_submit_button("Güncelle"):
                                 db_yaz(supabase.table("cariler").update({"isim": y_isim}).eq("id", sec_c['id']))
                                 db_yaz(supabase.table("cari_islemler").update({"cari_adi": y_isim}).eq("cari_adi", sec_c['isim']))
+                                st.session_state.genel_mesaj = ("success", "Cari güncellendi!")
                                 st.rerun()
                         with c_s:
                             if st.form_submit_button("Sil"):
-                                db_yaz(supabase.table("cariler").delete().eq("id", sec_c['id']))
+                                if db_yaz(supabase.table("cariler").delete().eq("id", sec_c['id'])):
+                                    st.session_state.genel_mesaj = ("info", "Cari silindi!")
                                 st.rerun()
 
     with tab1:
         cariler_db = db_oku(supabase.table("cariler").select("*"))
         if cariler_db:
-            if "cari_msg" in st.session_state:
-                m_type, m_text = st.session_state["cari_msg"]
-                if m_type == "success": st.success(m_text)
-                elif m_type == "warning": st.warning(m_text)
-                del st.session_state["cari_msg"]
             c1, c2 = st.columns(2)
             with c1:
                 st.date_input("İşlem Tarihi", datetime.date.today(), key="cari_islem_tarih")
@@ -865,12 +883,14 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                                     db_yaz(supabase.table("cari_islemler").update({"tarih": str(y_tarih), "islem_tipi": y_tip, "tutar": y_tutar, "aciklama": y_ack, "odeme_tipi": y_odeme if y_tip == "Ödeme Yaptık (Borç Düşer)" else "- Yok -"}).eq("id", sec_i['id']))
                                     if y_tip == "Ödeme Yaptık (Borç Düşer)" and y_odeme in b_liste:
                                         db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(y_tarih), "hesap_adi": y_odeme, "islem_tipi": "Para Çıkışı", "karsi_hesap": sec_i['cari_adi'], "tutar": y_tutar, "aciklama": f"Cari Ödemesi: {y_ack}"}))
+                                    st.session_state.genel_mesaj = ("success", "İşlem güncellendi!")
                                     st.rerun()
                             with cs:
                                 if st.form_submit_button("Sil"):
                                     if sec_i['islem_tipi'] == "Ödeme Yaptık (Borç Düşer)" and sec_i.get('odeme_tipi') in b_liste:
                                         db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", sec_i['tarih']).eq("tutar", sec_i['tutar']).eq("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}"))
-                                    db_yaz(supabase.table("cari_islemler").delete().eq("id", sec_i['id']))
+                                    if db_yaz(supabase.table("cari_islemler").delete().eq("id", sec_i['id'])):
+                                        st.session_state.genel_mesaj = ("info", "İşlem silindi!")
                                     st.rerun()
 
     with tab2:
@@ -908,6 +928,7 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
 
 elif menu == "Kasa Yönetimi (Virman)":
     st.header("Kasa Yönetimi ve Virman")
+    bildirim_goster()
     secilen = st.date_input("İşlem Tarihi", datetime.date.today())
     
     st.subheader("🏦 Kasa - Banka Arası Transfer")
@@ -931,11 +952,11 @@ elif menu == "Kasa Yönetimi (Virman)":
                             if kb_yon == "Kasadan/Havuzdan Bankaya Yatırma":
                                 db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Bankaya Yatırılan", "gonderen": kb_kasa, "tutar": kb_tutar}))
                                 db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(secilen), "hesap_adi": kb_banka, "islem_tipi": "Para Girişi", "karsi_hesap": kb_kasa, "tutar": kb_tutar, "aciklama": f"{kb_kasa}'dan Yatırılan"}))
-                                st.success("Para Bankaya Aktarıldı!")
+                                st.session_state.genel_mesaj = ("success", "Para bankaya aktarıldı!")
                             else:
                                 db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(secilen), "hesap_adi": kb_banka, "islem_tipi": "Para Çıkışı", "karsi_hesap": kb_kasa, "tutar": kb_tutar, "aciklama": f"{kb_kasa}'ya Çekilen"}))
                                 db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Bankadan Çekilen", "alan": kb_kasa, "tutar": kb_tutar}))
-                                st.success("Para Kasaya Çekildi!")
+                                st.session_state.genel_mesaj = ("success", "Para kasaya çekildi!")
                             st.rerun()
     else:
         st.info("💡 Kasa ile Banka arasında transfer yapmak için lütfen önce 'Banka & Kart Yönetimi' sayfasından Banka Hesabı ekleyin.")
@@ -951,8 +972,8 @@ elif menu == "Kasa Yönetimi (Virman)":
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Kasaya Ekle"):
                 if k_tutar > 0:
-                    db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Para Girişi (Sermaye)", "alan": k_secim, "tutar": k_tutar}))
-                    st.success("Nakit Eklendi!")
+                    if db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Para Girişi (Sermaye)", "alan": k_secim, "tutar": k_tutar})):
+                        st.session_state.genel_mesaj = ("success", "Nakit başarıyla eklendi!")
                     st.rerun()
 
     st.subheader("Kasalar Arası Virman")
@@ -965,8 +986,9 @@ elif menu == "Kasa Yönetimi (Virman)":
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Virman Yap"):
                 if gonderen != alan and tutar_v > 0:
-                    db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Virman", "gonderen": gonderen, "alan": alan, "tutar": tutar_v}))
-                    st.success("Virman Yapıldı!")
+                    if db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": "Virman", "gonderen": gonderen, "alan": alan, "tutar": tutar_v})):
+                        st.session_state.genel_mesaj = ("success", "Virman başarıyla yapıldı!")
+                    st.rerun()
 
     st.subheader("Kasa Sayım Farkı (Eksik / Fazla)")
     with st.form("kasa_fark_form"):
@@ -978,8 +1000,9 @@ elif menu == "Kasa Yönetimi (Virman)":
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Farkı İşle"):
                 islem = "Eksik" if f_durum == "Eksik Çıktı" else "Fazla"
-                db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": islem, "gonderen": f_kasa if islem=="Eksik" else None, "alan": f_kasa if islem=="Fazla" else None, "tutar": f_tutar}))
-                st.success("İşlendi!")
+                if db_yaz(supabase.table("kasa_islemleri").insert({"tarih": str(secilen), "islem_tipi": islem, "gonderen": f_kasa if islem=="Eksik" else None, "alan": f_kasa if islem=="Fazla" else None, "tutar": f_tutar})):
+                    st.session_state.genel_mesaj = ("success", "Kasa farkı işlendi!")
+                st.rerun()
 
     st.divider()
     with st.expander("✏️ Sermaye, Virman ve Fark Düzenle", expanded=False):
@@ -1024,7 +1047,7 @@ elif menu == "Kasa Yönetimi (Virman)":
                             elif y_islem in ["Eksik", "Bankaya Yatırılan"]: veri = {"tarih": str(y_tar), "islem_tipi": y_islem, "gonderen": y_gon, "alan": None, "tutar": y_tutar}
                             elif y_islem in ["Fazla", "Para Girişi (Sermaye)", "Bankadan Çekilen"]: veri = {"tarih": str(y_tar), "islem_tipi": y_islem, "gonderen": None, "alan": y_aln, "tutar": y_tutar}
                             db_yaz(supabase.table("kasa_islemleri").update(veri).eq("id", sec_k['id']))
-                            st.success("İşlem güncellendi!")
+                            st.session_state.genel_mesaj = ("success", "Kasa işlemi güncellendi!")
                             st.rerun()
                     with c_sil:
                         if st.form_submit_button("Sil"):
@@ -1033,7 +1056,8 @@ elif menu == "Kasa Yönetimi (Virman)":
                             elif sec_k['islem_tipi'] == "Bankadan Çekilen":
                                 db_yaz(supabase.table("banka_islemleri").delete().eq("tarih", sec_k['tarih']).eq("tutar", sec_k['tutar']).eq("aciklama", f"{sec_k['alan']}'ya Çekilen"))
                                 
-                            db_yaz(supabase.table("kasa_islemleri").delete().eq("id", sec_k['id']))
+                            if db_yaz(supabase.table("kasa_islemleri").delete().eq("id", sec_k['id'])):
+                                st.session_state.genel_mesaj = ("info", "Kasa işlemi silindi!")
                             st.rerun()
 
     cirolar_tum = db_oku(supabase.table("ciro").select("*").lte("tarih", str(secilen)))
@@ -1146,7 +1170,7 @@ elif menu == "Kasa Yönetimi (Virman)":
         st.write(f"Bankaya Aktarılan: - {pavo_cikis:,.2f} ₺")
         st.metric("HAVUZDA BEKLEYEN BİRİKİM", f"{pavo_net:,.2f} ₺")
 
-    # --- YENİ EKLENEN KASA HAREKETLERİ DÖKÜMÜ ---
+    # --- KASA HAREKETLERİ DÖKÜMÜ ---
     st.divider()
     st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
     
@@ -1220,6 +1244,7 @@ elif menu == "Kasa Yönetimi (Virman)":
 # --- PERSONEL MODÜLÜ ---
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
+    bildirim_goster()
     tab1, tab2, tab4, tab3 = st.tabs(["📝 Puantaj Girişi", "📋 Filtreli Geçmiş Kayıtlar", "💰 Maaş Hesaplama", "⚙️ Personel Yönetimi"])
     
     with tab3:
@@ -1235,8 +1260,8 @@ elif menu == "Personel & Puantaj":
                 
             if st.form_submit_button("Ekle"):
                 if yeni_personel.strip():
-                    db_yaz(supabase.table("personeller").insert({"isim": yeni_personel.strip(), "maas": yeni_maas, "ise_baslama_tarihi": str(yeni_tarih), "yillik_izin_hakki": yeni_izin_hakki}))
-                    st.success("Eklendi!")
+                    if db_yaz(supabase.table("personeller").insert({"isim": yeni_personel.strip(), "maas": yeni_maas, "ise_baslama_tarihi": str(yeni_tarih), "yillik_izin_hakki": yeni_izin_hakki})):
+                        st.session_state.genel_mesaj = ("success", "Personel eklendi!")
                     st.rerun()
                     
         st.divider()
@@ -1287,19 +1312,16 @@ elif menu == "Personel & Puantaj":
                             if st.form_submit_button("Güncelle"):
                                 db_yaz(supabase.table("personeller").update({"isim": y_isim, "maas": y_maas, "ise_baslama_tarihi": str(y_tarih), "yillik_izin_hakki": y_izin_hakki}).eq("id", sec_pers['id']))
                                 db_yaz(supabase.table("puantaj").update({"personel_adi": y_isim}).eq("personel_adi", sec_pers['isim']))
+                                st.session_state.genel_mesaj = ("success", "Personel güncellendi!")
                                 st.rerun()
                         with cs:
                             if st.form_submit_button("Sil"):
-                                db_yaz(supabase.table("personeller").delete().eq("id", sec_pers['id']))
+                                if db_yaz(supabase.table("personeller").delete().eq("id", sec_pers['id'])):
+                                    st.session_state.genel_mesaj = ("info", "Personel silindi!")
                                 st.rerun()
 
     with tab1:
         if personel_listesi:
-            if "puantaj_msg" in st.session_state:
-                m_type, m_text = st.session_state["puantaj_msg"]
-                if m_type == "success": st.success(m_text)
-                elif m_type == "error": st.error(m_text)
-                del st.session_state["puantaj_msg"]
             c1, c2 = st.columns(2)
             with c1:
                 st.date_input("Tarih", datetime.date.today(), key="puantaj_tarih")
@@ -1351,11 +1373,13 @@ elif menu == "Personel & Puantaj":
                                             hata_var = True
                                             
                                     if not hata_var:
-                                        db_yaz(supabase.table("puantaj").update({"tarih": str(y_tarih), "personel_adi": y_isim, "durum": y_durum, "fazla_mesai_saati": y_mesai}).eq("id", secilen_p['id']))
+                                        if db_yaz(supabase.table("puantaj").update({"tarih": str(y_tarih), "personel_adi": y_isim, "durum": y_durum, "fazla_mesai_saati": y_mesai}).eq("id", secilen_p['id'])):
+                                            st.session_state.genel_mesaj = ("success", "Puantaj güncellendi!")
                                         st.rerun()
                             with cs:
                                 if st.form_submit_button("Sil"):
-                                    db_yaz(supabase.table("puantaj").delete().eq("id", secilen_p['id']))
+                                    if db_yaz(supabase.table("puantaj").delete().eq("id", secilen_p['id'])):
+                                        st.session_state.genel_mesaj = ("info", "Puantaj silindi!")
                                     st.rerun()
 
     with tab2:
@@ -1388,6 +1412,7 @@ elif menu == "Personel & Puantaj":
 
     with tab4:
         st.subheader("Aylık Maaş ve Mesai Hesaplama")
+        st.info("💡 **Bilgi:** Maaş kesinti üzerinden değil; geldiği ve hak ettiği günler üzerinden hesaplanır (SGK Standartları). Tam Gün, Haftalık İzin ve Yıllık İzin = **1 Gün**. Yarım Gün = **0.5 Gün**.")
         
         aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
         col1, col2 = st.columns(2)
