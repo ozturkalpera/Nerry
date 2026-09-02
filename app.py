@@ -260,7 +260,6 @@ def platform_sayfasi(platform_adi):
     st.header(f"📦 {platform_adi} Yönetimi")
     bildirim_goster()
     
-    # SEKME YERİNE YATAY MENÜ (SAYFA KAYMASINI ENGELLER)
     alt_menu = st.radio(
         "İşlem Seçin", 
         ["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret"], 
@@ -372,7 +371,7 @@ def platform_sayfasi(platform_adi):
             st.dataframe(df_odenen[['tarih', 'odeme_tipi', 'brut', 'net', 'tahsilat_tarihi']], hide_index=True, use_container_width=True)
             
             with st.expander("↩️ Tahsilatı Geri Al (Yanlış Aktarımlar İçin)", expanded=False):
-                st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz. (Not: Bankaya yansıyan toplu tutarı 'Banka & Kart Yönetimi' sayfasından da silmeyi veya düzeltmeyi unutmayın.)")
+                st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz.")
                 secenekler_o = {f"{o['tarih']} | {o['odeme_tipi']} | Brüt: {o['brut']} ₺ | Net: {o['net']} ₺": o for o in odenenler}
                 sec_o_str = st.selectbox("Geri Alınacak Kaydı Seçin", ["Lütfen seçin..."] + list(secenekler_o.keys()), key=f"{platform_adi}_gerial")
                 if sec_o_str != "Lütfen seçin...":
@@ -1218,6 +1217,11 @@ elif menu == "Kasa Yönetimi (Virman)":
     # --- KASA HAREKETLERİ DÖKÜMÜ ---
     st.divider()
     st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
+    
+    cirolar_all = db_oku(supabase.table("ciro").select("*"))
+    masraflar_all = db_oku(supabase.table("masraf").select("*"))
+    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
+    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
     
     kasa_dokum = []
     
