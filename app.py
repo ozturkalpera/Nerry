@@ -79,7 +79,6 @@ def platform_kaydet_cb(plat_adi):
             if len(ayar_getir) > 0:
                 ayar = ayar_getir[0]
                 
-                # VİRGÜLDEN SONRA 2 BASAMAK YUVARLAMASI YAPILDI
                 k_tutari = round(tutar * (float(ayar['komisyon']) / 100), 2)
                 s_tutari = round((tutar / 1.10) * (float(ayar['stopaj']) / 100), 2)
                 kes = round(k_tutari + s_tutari, 2)
@@ -260,9 +259,18 @@ if st.sidebar.button("Çıkış Yap"):
 def platform_sayfasi(platform_adi):
     st.header(f"📦 {platform_adi} Yönetimi")
     bildirim_goster()
-    tab1, tab2, tab3 = st.tabs(["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret"])
     
-    with tab1:
+    # SEKME YERİNE YATAY MENÜ (SAYFA KAYMASINI ENGELLER)
+    alt_menu = st.radio(
+        "İşlem Seçin", 
+        ["💰 Satış Girişi", "🕒 Tahsilat Takibi", "⚙️ Sisteme Öğret"], 
+        horizontal=True, 
+        label_visibility="collapsed",
+        key=f"{platform_adi}_alt_menu"
+    )
+    st.markdown("---")
+    
+    if alt_menu == "💰 Satış Girişi":
         st.subheader("Satışları Gir")
         st.date_input("Satış Tarihi", datetime.date.today(), key=f"{platform_adi}_tarih")
         col1, col2 = st.columns(2)
@@ -292,13 +300,10 @@ def platform_sayfasi(platform_adi):
                                 ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", y_ps_odeme))
                                 if len(ayar_getir) > 0:
                                     ayar = ayar_getir[0]
-                                    
-                                    # GÜNCELLEMEDE DE 2 BASAMAK YUVARLAMA UYGULANDI
                                     k_tutari = round(y_ps_brut * (float(ayar['komisyon']) / 100), 2)
                                     s_tutari = round((y_ps_brut / 1.10) * (float(ayar['stopaj']) / 100), 2)
                                     kes = round(k_tutari + s_tutari, 2)
                                     net_t = round(y_ps_brut - kes if y_ps_odeme == "Online" else -kes, 2)
-                                    
                                     t_tarihi = y_ps_tarih + datetime.timedelta(days=int(ayar['vade']))
                                     guncel_veri = {"tarih": str(y_ps_tarih), "odeme_tipi": y_ps_odeme, "brut": round(y_ps_brut, 2), "komisyon_tutari": k_tutari, "stopaj_tutari": s_tutari, "kesinti": kes, "net": net_t, "tahsilat_tarihi": str(t_tarihi)}
                                     
@@ -312,7 +317,7 @@ def platform_sayfasi(platform_adi):
                                     st.session_state.genel_mesaj = ("info", "Satış kaydı silindi!")
                                     st.rerun()
 
-    with tab2:
+    elif alt_menu == "🕒 Tahsilat Takibi":
         bekleyenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Bekliyor"))
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
@@ -377,7 +382,7 @@ def platform_sayfasi(platform_adi):
                         st.session_state.genel_mesaj = ("success", "Tahsilat başarıyla geri alındı, işlem tekrar listeye eklendi!")
                         st.rerun()
 
-    with tab3:
+    elif alt_menu == "⚙️ Sisteme Öğret":
         st.subheader("Komisyon Ayarları")
         with st.form(f"{platform_adi}_ayar_form"):
             y_o_kom = st.number_input("Online Komisyon (%)", value=10.0)
@@ -455,9 +460,16 @@ elif menu == "Trendyol Yönetimi": platform_sayfasi("Trendyol")
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
     bildirim_goster()
-    tab1, tab2, tab4, tab3 = st.tabs(["💵 İşlem Girişi", "📊 Bakiye ve Filtreli Ekstre", "📂 Excel İçe Aktar", "⚙️ Hesap / Kart Ekle"])
     
-    with tab3:
+    alt_menu = st.radio(
+        "İşlem Seçin", 
+        ["💵 İşlem Girişi", "📊 Bakiye ve Filtreli Ekstre", "📂 Excel İçe Aktar", "⚙️ Hesap / Kart Ekle"], 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
+    st.markdown("---")
+    
+    if alt_menu == "⚙️ Hesap / Kart Ekle":
         st.subheader("Sisteme Yeni Banka veya Kart Ekle")
         with st.form("banka_ekle_form"):
             b_isim = st.text_input("Hesap / Kart Adı")
@@ -490,7 +502,7 @@ elif menu == "Banka & Kart Yönetimi":
                                     st.session_state.genel_mesaj = ("info", "Hesap sistemden silindi!")
                                 st.rerun()
 
-    with tab1:
+    elif alt_menu == "💵 İşlem Girişi":
         st.subheader("Banka veya Kredi Kartı İşlemi Ekle")
         bankalar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
         if bankalar_db:
@@ -542,7 +554,7 @@ elif menu == "Banka & Kart Yönetimi":
                                         st.session_state.genel_mesaj = ("info", "Banka işlemi silindi!")
                                     st.rerun()
 
-    with tab2:
+    elif alt_menu == "📊 Bakiye ve Filtreli Ekstre":
         st.subheader("Hesap Bakiyeleri ve Kart Borçları")
         islemler_b = db_oku(supabase.table("banka_islemleri").select("*"))
         hesaplar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
@@ -599,11 +611,19 @@ elif menu == "Banka & Kart Yönetimi":
             dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'yon', 'karsi_hesap', 'tutar', 'aciklama']])
             st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
 
-    with tab4:
+    elif alt_menu == "📂 Excel İçe Aktar":
         st.subheader("📂 Banka Ekstresi (Excel) İçe Aktar ve Öğret")
-        alt_tab1, alt_tab2 = st.tabs(["📤 Excel Yükle ve Aktar", "🧠 Kelime Kuralları (Öğret)"])
         
-        with alt_tab2:
+        excel_menu = st.radio(
+            "İşlem Seçin", 
+            ["📤 Excel Yükle ve Aktar", "🧠 Kelime Kuralları (Öğret)"], 
+            horizontal=True, 
+            label_visibility="collapsed",
+            key="banka_excel_menu"
+        )
+        st.markdown("---")
+        
+        if excel_menu == "🧠 Kelime Kuralları (Öğret)":
             tipler_db = db_oku(supabase.table("masraf_tipleri").select("*"))
             masraf_tipleri = [t['tip_adi'] for t in tipler_db] if tipler_db else ["Genel Masraf"]
             cariler_db = db_oku(supabase.table("cariler").select("*"))
@@ -631,7 +651,7 @@ elif menu == "Banka & Kart Yönetimi":
                                 st.session_state.genel_mesaj = ("info", "Kural silindi!")
                             st.rerun()
 
-        with alt_tab1:
+        elif excel_menu == "📤 Excel Yükle ve Aktar":
             bankalar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
             banka_isimleri = [b['isim'] for b in bankalar_db] if bankalar_db else []
             
@@ -826,9 +846,16 @@ elif menu == "Masraf Girişi":
 elif menu == "Cari (Tedarikçi) Yönetimi":
     st.header("🏢 Cari (Tedarikçi) Yönetimi")
     bildirim_goster()
-    tab1, tab2, tab3 = st.tabs(["📈 Fatura & Ödeme Girişi", "📋 Cari Ekstre", "⚙️ Tedarikçi Ekle"])
     
-    with tab3:
+    alt_menu = st.radio(
+        "İşlem Seçin", 
+        ["📈 Fatura & Ödeme Girişi", "📋 Cari Ekstre", "⚙️ Tedarikçi Ekle"], 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
+    st.markdown("---")
+    
+    if alt_menu == "⚙️ Tedarikçi Ekle":
         with st.form("cari_ekle_form"):
             yeni_cari = st.text_input("Tedarikçi Firma / Kişi Adı")
             if st.form_submit_button("Ekle"):
@@ -858,7 +885,7 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                                     st.session_state.genel_mesaj = ("info", "Cari silindi!")
                                 st.rerun()
 
-    with tab1:
+    elif alt_menu == "📈 Fatura & Ödeme Girişi":
         cariler_db = db_oku(supabase.table("cariler").select("*"))
         if cariler_db:
             c1, c2 = st.columns(2)
@@ -911,7 +938,7 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                                         st.session_state.genel_mesaj = ("info", "İşlem silindi!")
                                     st.rerun()
 
-    with tab2:
+    elif alt_menu == "📋 Cari Ekstre":
         islemler = db_oku(supabase.table("cari_islemler").select("*"))
         if islemler:
             df_i = pd.DataFrame(islemler)
@@ -1192,11 +1219,6 @@ elif menu == "Kasa Yönetimi (Virman)":
     st.divider()
     st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
     
-    cirolar_all = db_oku(supabase.table("ciro").select("*"))
-    masraflar_all = db_oku(supabase.table("masraf").select("*"))
-    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
-    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
-    
     kasa_dokum = []
     
     if cirolar_all:
@@ -1263,9 +1285,16 @@ elif menu == "Kasa Yönetimi (Virman)":
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
     bildirim_goster()
-    tab1, tab2, tab4, tab3 = st.tabs(["📝 Puantaj Girişi", "📋 Filtreli Geçmiş Kayıtlar", "💰 Maaş Hesaplama", "⚙️ Personel Yönetimi"])
     
-    with tab3:
+    alt_menu = st.radio(
+        "İşlem Seçin", 
+        ["📝 Puantaj Girişi", "📋 Filtreli Geçmiş Kayıtlar", "💰 Maaş Hesaplama", "⚙️ Personel Yönetimi"], 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
+    st.markdown("---")
+    
+    if alt_menu == "⚙️ Personel Yönetimi":
         st.subheader("Sisteme Yeni Personel Ekle")
         with st.form("personel_ekle_form"):
             col1, col2 = st.columns(2)
@@ -1338,7 +1367,8 @@ elif menu == "Personel & Puantaj":
                                     st.session_state.genel_mesaj = ("info", "Personel silindi!")
                                 st.rerun()
 
-    with tab1:
+    elif alt_menu == "📝 Puantaj Girişi":
+        personel_listesi = db_oku(supabase.table("personeller").select("*"))
         if personel_listesi:
             c1, c2 = st.columns(2)
             with c1:
@@ -1400,7 +1430,7 @@ elif menu == "Personel & Puantaj":
                                         st.session_state.genel_mesaj = ("info", "Puantaj silindi!")
                                     st.rerun()
 
-    with tab2:
+    elif alt_menu == "📋 Filtreli Geçmiş Kayıtlar":
         st.subheader("Geçmiş Puantaj ve İzin Kayıtları")
         puantajlar = db_oku(supabase.table("puantaj").select("*").order("tarih", desc=True))
         if puantajlar:
@@ -1428,7 +1458,7 @@ elif menu == "Personel & Puantaj":
             dosya_p, uzanti_p, mime_p = excel_indir(df_puantaj[['tarih', 'personel_adi', 'durum', 'fazla_mesai_saati']])
             st.download_button(label="📥 Filtrelenmiş Kayıtları Excel'e İndir", data=dosya_p, file_name=f"Puantaj_Raporu.{uzanti_p}", mime=mime_p)
 
-    with tab4:
+    elif alt_menu == "💰 Maaş Hesaplama":
         st.subheader("Aylık Maaş ve Mesai Hesaplama")
         st.info("💡 **Bilgi:** Maaş kesinti üzerinden değil; geldiği ve hak ettiği günler üzerinden hesaplanır (SGK Standartları). Tam Gün, Haftalık İzin ve Yıllık İzin = **1 Gün**. Yarım Gün = **0.5 Gün**.")
         
