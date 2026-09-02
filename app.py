@@ -347,7 +347,7 @@ def platform_sayfasi(platform_adi):
                             db_yaz(supabase.table("banka_islemleri").insert({
                                 "tarih": str(tahsilat_tarihi), "hesap_adi": secilen_banka, "islem_tipi": "Para Girişi", "tutar": toplam_net, "aciklama": f"{platform_adi} Tahsilatı"
                             }))
-                        st.session_state.genel_mesaj = ("success", "Tahsilat aktarıldı!")
+                        st.session_state.genel_mesaj = ("success", "Tahsilat başarıyla aktarıldı!")
                         st.rerun()
         else:
             st.success("Bekleyen alacağınız bulunmuyor.")
@@ -358,6 +358,17 @@ def platform_sayfasi(platform_adi):
             st.subheader("✅ Tahsil Edilenler")
             df_odenen = pd.DataFrame(odenenler).sort_values(by="tarih", ascending=False)
             st.dataframe(df_odenen[['tarih', 'odeme_tipi', 'brut', 'net', 'tahsilat_tarihi']], hide_index=True, use_container_width=True)
+            
+            with st.expander("↩️ Tahsilatı Geri Al (Yanlış Aktarımlar İçin)", expanded=False):
+                st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz. (Not: Bankaya yansıyan toplu tutarı 'Banka & Kart Yönetimi' sayfasından da silmeyi veya düzeltmeyi unutmayın.)")
+                secenekler_o = {f"{o['tarih']} | {o['odeme_tipi']} | Brüt: {o['brut']} ₺ | Net: {o['net']} ₺": o for o in odenenler}
+                sec_o_str = st.selectbox("Geri Alınacak Kaydı Seçin", ["Lütfen seçin..."] + list(secenekler_o.keys()), key=f"{platform_adi}_gerial")
+                if sec_o_str != "Lütfen seçin...":
+                    sec_o = secenekler_o[sec_o_str]
+                    if st.button("İşlemi Geri Al (Bekleyenlere Taşı)", key=f"{platform_adi}_gerial_btn"):
+                        db_yaz(supabase.table("platform_satis").update({"durum": "Bekliyor"}).eq("id", sec_o['id']))
+                        st.session_state.genel_mesaj = ("success", "Tahsilat başarıyla geri alındı, işlem tekrar listeye eklendi!")
+                        st.rerun()
 
     with tab3:
         st.subheader("Komisyon Ayarları")
@@ -377,7 +388,7 @@ def platform_sayfasi(platform_adi):
                     st.session_state.genel_mesaj = ("success", "Ayarlar güncellendi!")
                     st.rerun()
 
-# --- MENÜLER ---
+# --- MENÜ İÇERİKLERİ ---
 if menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     bildirim_goster()
