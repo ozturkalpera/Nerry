@@ -78,15 +78,18 @@ def platform_kaydet_cb(plat_adi):
             ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", plat_adi).eq("odeme_tipi", o_tip))
             if len(ayar_getir) > 0:
                 ayar = ayar_getir[0]
-                k_tutari = tutar * (float(ayar['komisyon']) / 100)
-                s_tutari = (tutar / 1.10) * (float(ayar['stopaj']) / 100)
-                kes = k_tutari + s_tutari
-                net_t = tutar - kes if o_tip == "Online" else -kes
+                
+                # VİRGÜLDEN SONRA 2 BASAMAK YUVARLAMASI YAPILDI
+                k_tutari = round(tutar * (float(ayar['komisyon']) / 100), 2)
+                s_tutari = round((tutar / 1.10) * (float(ayar['stopaj']) / 100), 2)
+                kes = round(k_tutari + s_tutari, 2)
+                net_t = round(tutar - kes if o_tip == "Online" else -kes, 2)
+                
                 t_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
                 
                 veri = {
                     "tarih": str(tarih), "platform": plat_adi, "odeme_tipi": o_tip, 
-                    "brut": tutar, "komisyon_tutari": k_tutari, "stopaj_tutari": s_tutari, 
+                    "brut": round(tutar, 2), "komisyon_tutari": k_tutari, "stopaj_tutari": s_tutari, 
                     "kesinti": kes, "net": net_t, "tahsilat_tarihi": str(t_tarihi), "durum": "Bekliyor"
                 }
                 if not db_yaz(supabase.table("platform_satis").insert(veri)):
@@ -289,12 +292,16 @@ def platform_sayfasi(platform_adi):
                                 ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", y_ps_odeme))
                                 if len(ayar_getir) > 0:
                                     ayar = ayar_getir[0]
-                                    k_tutari = y_ps_brut * (float(ayar['komisyon']) / 100)
-                                    s_tutari = (y_ps_brut / 1.10) * (float(ayar['stopaj']) / 100)
-                                    kes = k_tutari + s_tutari
-                                    net_t = y_ps_brut - kes if y_ps_odeme == "Online" else -kes
+                                    
+                                    # GÜNCELLEMEDE DE 2 BASAMAK YUVARLAMA UYGULANDI
+                                    k_tutari = round(y_ps_brut * (float(ayar['komisyon']) / 100), 2)
+                                    s_tutari = round((y_ps_brut / 1.10) * (float(ayar['stopaj']) / 100), 2)
+                                    kes = round(k_tutari + s_tutari, 2)
+                                    net_t = round(y_ps_brut - kes if y_ps_odeme == "Online" else -kes, 2)
+                                    
                                     t_tarihi = y_ps_tarih + datetime.timedelta(days=int(ayar['vade']))
-                                    guncel_veri = {"tarih": str(y_ps_tarih), "odeme_tipi": y_ps_odeme, "brut": y_ps_brut, "komisyon_tutari": k_tutari, "stopaj_tutari": s_tutari, "kesinti": kes, "net": net_t, "tahsilat_tarihi": str(t_tarihi)}
+                                    guncel_veri = {"tarih": str(y_ps_tarih), "odeme_tipi": y_ps_odeme, "brut": round(y_ps_brut, 2), "komisyon_tutari": k_tutari, "stopaj_tutari": s_tutari, "kesinti": kes, "net": net_t, "tahsilat_tarihi": str(t_tarihi)}
+                                    
                                     if db_yaz(supabase.table("platform_satis").update(guncel_veri).eq("id", secilen_ps['id'])):
                                         st.session_state.genel_mesaj = ("success", "Satış kaydı güncellendi!")
                                         st.rerun()
@@ -339,7 +346,7 @@ def platform_sayfasi(platform_adi):
                     with c_t2:
                         secilen_banka = st.selectbox("Paranın Yattığı Banka Hesabı", banka_isimleri, key=f"{platform_adi}_tah_bnk")
                     
-                    toplam_net = float(secilenler['net'].sum())
+                    toplam_net = round(float(secilenler['net'].sum()), 2)
                     if st.button(f"✅ Seçili Satışları 'ÖDENDİ' Yap ve Hesaba Aktar ({toplam_net:,.2f} ₺)", type="primary", key=f"{platform_adi}_odeme_btn"):
                         for idx in secilenler["id"]:
                             db_yaz(supabase.table("platform_satis").update({"durum": "Ödendi"}).eq("id", int(idx)))
