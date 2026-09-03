@@ -371,7 +371,7 @@ def platform_sayfasi(platform_adi):
             st.dataframe(df_odenen[['tarih', 'odeme_tipi', 'brut', 'net', 'tahsilat_tarihi']], hide_index=True, use_container_width=True)
             
             with st.expander("↩️ Tahsilatı Geri Al (Yanlış Aktarımlar İçin)", expanded=False):
-                st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz.")
+                st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz. (Not: Bankaya yansıyan toplu tutarı 'Banka & Kart Yönetimi' sayfasından da silmeyi veya düzeltmeyi unutmayın.)")
                 secenekler_o = {f"{o['tarih']} | {o['odeme_tipi']} | Brüt: {o['brut']} ₺ | Net: {o['net']} ₺": o for o in odenenler}
                 sec_o_str = st.selectbox("Geri Alınacak Kaydı Seçin", ["Lütfen seçin..."] + list(secenekler_o.keys()), key=f"{platform_adi}_gerial")
                 if sec_o_str != "Lütfen seçin...":
@@ -462,7 +462,7 @@ elif menu == "Banka & Kart Yönetimi":
     
     alt_menu = st.radio(
         "İşlem Seçin", 
-        ["💵 İşlem Girişi", "📊 Bakiye ve Filtreli Ekstre", "📂 Excel İçe Aktar", "⚙️ Hesap / Kart Ekle"], 
+        ["💵 İşlem Girişi", "📊 Bakiyeler ve Hesap Ekstresi", "📂 Excel İçe Aktar", "⚙️ Hesap / Kart Ekle"], 
         horizontal=True, 
         label_visibility="collapsed"
     )
@@ -553,12 +553,15 @@ elif menu == "Banka & Kart Yönetimi":
                                         st.session_state.genel_mesaj = ("info", "Banka işlemi silindi!")
                                     st.rerun()
 
-    elif alt_menu == "📊 Bakiye ve Filtreli Ekstre":
-        st.subheader("Hesap Bakiyeleri ve Kart Borçları")
+    elif alt_menu == "📊 Bakiyeler ve Hesap Ekstresi":
+        st.subheader("Güncel Hesap Bakiyeleri ve Kart Borçları")
         islemler_b = db_oku(supabase.table("banka_islemleri").select("*"))
         hesaplar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
         
+        banka_isimleri_tam = []
+        
         if hesaplar_db and islemler_b:
+            banka_isimleri_tam = [b['isim'] for b in hesaplar_db]
             hesap_sozluk = {b['isim']: {'Tip': b['tip'], 'Bakiye (Eksi İse Borç)': 0.0} for b in hesaplar_db}
             for i in islemler_b:
                 h = i['hesap_adi']
@@ -574,23 +577,64 @@ elif menu == "Banka & Kart Yönetimi":
             df_bakiye = pd.DataFrame.from_dict(hesap_sozluk, orient='index').reset_index().rename(columns={'index': 'Hesap / Kart Adı'})
             st.dataframe(df_bakiye, hide_index=True, use_container_width=True)
             
+            # --- YENİ EKLENEN KISIM: BAKİYELİ HESAP EKSTRESİ ---
             st.divider()
-            st.subheader("Tüm Banka ve Kart Hareketleri Dökümü")
+            st.subheader("🧾 Hesap Ekstresi (Bakiyeli Rapor)")
+            if banka_isimleri_tam:
+                secili_ekstre_hesabi = st.selectbox("Ekstresini Görmek İstediğiniz Hesabı Seçin", ["Lütfen seçin..."] + banka_isimleri_tam)
+                if secili_ekstre_hesabi != "Lütfen seçin...":
+                    hesap_hareketleri = []
+                    for i in islemler_b:
+                        if i['hesap_adi'] == secili_ekstre_hesabi:
+                            if i['islem_tipi'] in ["Açılış", "Para Girişi"]:
+                                hesap_hareketleri.append({"tarih": i['tarih'], "islem": i['islem_tipi'], "aciklama": i.get('aciklama',''), "karsi_hesap": i.get('karsi_hesap',''), "Giriş": float(i['tutar']), "Çıkış": 0.0})
+                            else:
+                                hesap_hareketleri.append({"tarih": i['tarih'], "islem": i['islem_tipi'], "aciklama": i.get('aciklama',''), "karsi_hesap": i.get('karsi_hesap',''), "Giriş": 0.0, "Çıkış": float(i['tutar'])})
+                        elif i.get('karsi_hesap') == secili_ekstre_hesabi and i['islem_tipi'] in ["Bankalar Arası Virman", "Kredi Kartı Borç Ödemesi"]:
+                            hesap_hareketleri.append({"tarih": i['tarih'], "islem": f"{i['islem_tipi']} (Gelen)", "aciklama": i.get('aciklama',''), "karsi_hesap": i['hesap_adi'], "Giriş": float(i['tutar']), "Çıkış": 0.0})
+                            
+                    if hesap_hareketleri:
+                        df_e = pd.DataFrame(hesap_hareketleri)
+                        df_e['tarih_dt'] = pd.to_datetime(df_e['tarih'])
+                        df_e = df_e.sort_values(by="tarih_dt").reset_index(drop=True)
+                        
+                        bakiye_list = []
+                        bakiye = 0.0
+                        for idx, r in df_e.iterrows():
+                            bakiye += r['Giriş']
+                            bakiye -= r['Çıkış']
+                            bakiye_list.append(bakiye)
+                        
+                        df_e['Bakiye'] = bakiye_list
+                        df_e['tarih'] = df_e['tarih_dt'].dt.date
+                        df_e = df_e.sort_values(by="tarih_dt", ascending=False)
+                        
+                        st.dataframe(df_e[['tarih', 'islem', 'karsi_hesap', 'aciklama', 'Giriş', 'Çıkış', 'Bakiye']], hide_index=True, use_container_width=True)
+                        
+                        dosya_e, uzanti_e, mime_e = excel_indir(df_e[['tarih', 'islem', 'karsi_hesap', 'aciklama', 'Giriş', 'Çıkış', 'Bakiye']])
+                        st.download_button(f"📥 {secili_ekstre_hesabi} Ekstresini İndir", data=dosya_e, file_name=f"{secili_ekstre_hesabi}_Ekstresi.{uzanti_e}", mime=mime_e, key="dl_ekstre")
+                    else:
+                        st.info("Bu hesaba ait kayıt bulunmuyor.")
+
+            st.divider()
+            st.subheader("📋 Tüm Banka ve Kart Hareketleri (Genel Döküm)")
             
-            banka_dokum = []
+            # Burada çift kayıt çıkmaması için virmanları bölmeden listeliyoruz (Tüm işlemler ana listesi)
+            banka_dokum_genel = []
             for i in islemler_b:
-                if i['islem_tipi'] in ["Bankalar Arası Virman", "Kredi Kartı Borç Ödemesi"]:
-                    banka_dokum.append({"id": i['id'], "tarih": i['tarih'], "hesap_adi": i['hesap_adi'], "islem_tipi": f"{i['islem_tipi']} (Çıkış)", "karsi_hesap": i['karsi_hesap'], "tutar": float(i['tutar']), "aciklama": i.get('aciklama', ''), "yon": "Çıkış"})
-                    if i.get('karsi_hesap'):
-                        banka_dokum.append({"id": i['id'], "tarih": i['tarih'], "hesap_adi": i['karsi_hesap'], "islem_tipi": f"{i['islem_tipi']} (Giriş)", "karsi_hesap": i['hesap_adi'], "tutar": float(i['tutar']), "aciklama": i.get('aciklama', ''), "yon": "Giriş"})
-                else:
-                    yon = "Çıkış" if "Çıkış" in i['islem_tipi'] else "Giriş"
-                    banka_dokum.append({"id": i['id'], "tarih": i['tarih'], "hesap_adi": i['hesap_adi'], "islem_tipi": i['islem_tipi'], "karsi_hesap": i.get('karsi_hesap', ''), "tutar": float(i['tutar']), "aciklama": i.get('aciklama', ''), "yon": yon})
+                banka_dokum_genel.append({
+                    "tarih": i['tarih'], 
+                    "hesap_adi": i['hesap_adi'], 
+                    "islem_tipi": i['islem_tipi'], 
+                    "karsi_hesap": i.get('karsi_hesap', ''), 
+                    "tutar": float(i['tutar']), 
+                    "aciklama": i.get('aciklama', '')
+                })
                     
-            df_islem_b = pd.DataFrame(banka_dokum)
+            df_islem_b = pd.DataFrame(banka_dokum_genel)
             df_islem_b['tarih'] = pd.to_datetime(df_islem_b['tarih']).dt.date
             
-            with st.expander("🔍 Banka İşlemlerini Filtrele", expanded=True):
+            with st.expander("🔍 Genel Dökümü Filtrele", expanded=True):
                 c1, c2, c3, c4 = st.columns(4)
                 with c1: t_aralik_b = st.date_input("Tarih Aralığı", [df_islem_b['tarih'].min(), df_islem_b['tarih'].max()], key="filt_b_tar")
                 with c2: sec_hesap = st.multiselect("Hesap / Kart Seç", df_islem_b['hesap_adi'].unique().tolist(), key="filt_b_hesap")
@@ -604,11 +648,11 @@ elif menu == "Banka & Kart Yönetimi":
             if sec_islem_b: df_islem_b = df_islem_b[df_islem_b['islem_tipi'].isin(sec_islem_b)]
             if ara_b: df_islem_b = df_islem_b[df_islem_b['aciklama'].str.contains(ara_b, case=False, na=False)]
 
-            st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'yon', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
             st.info(f"📊 Ekranda filtrelenen toplam işlem sayısı: **{len(df_islem_b)}** | Toplam Tutar: **{df_islem_b['tutar'].sum():,.2f} ₺**")
             
-            dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'yon', 'karsi_hesap', 'tutar', 'aciklama']])
-            st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
+            dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']])
+            st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Tum_Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
 
     elif alt_menu == "📂 Excel İçe Aktar":
         st.subheader("📂 Banka Ekstresi (Excel) İçe Aktar ve Öğret")
@@ -795,14 +839,16 @@ elif menu == "Masraf Girişi":
                     c_gun, c_sil = st.columns(2)
                     with c_gun:
                         if st.form_submit_button("Güncelle"):
+                            # Eski Banka kaydı varsa kesin olarak sil (Tutardan bağımsız, isim/açıklama üzerinden nokta atışı)
                             if str(secilen_m['odeme_tipi']).startswith("Cari - "):
                                 eski_c_adi = secilen_m['odeme_tipi'].replace("Cari - ", "")
-                                db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", eski_c_adi).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("aciklama", f"Masraf: {secilen_m['aciklama']}"))
+                                db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", eski_c_adi).eq("tarih", str(secilen_m['tarih'])).ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
                             elif secilen_m['odeme_tipi'] in banka_liste:
-                                db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("islem_tipi", "Para Çıkışı (Masraf)"))
+                                db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", str(secilen_m['tarih'])).eq("islem_tipi", "Para Çıkışı (Masraf)").ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
                             
                             db_yaz(supabase.table("masraf").update({"tarih": str(y_tarih), "masraf_tipi": y_tip, "aciklama": y_aciklama, "tutar": y_tutar, "odeme_tipi": y_odeme_y}).eq("id", secilen_m['id']))
                             
+                            # Yeni Banka Kaydını Gir
                             if str(y_odeme_y).startswith("Cari - "):
                                 yeni_c_adi = y_odeme_y.replace("Cari - ", "")
                                 db_yaz(supabase.table("cari_islemler").insert({"tarih": str(y_tarih), "cari_adi": yeni_c_adi, "islem_tipi": "Gelen Fatura (Bize Borç Yazar)", "tutar": y_tutar, "aciklama": f"Masraf: {y_aciklama}"}))
@@ -816,10 +862,10 @@ elif menu == "Masraf Girişi":
                             if db_yaz(supabase.table("masraf").delete().eq("id", secilen_m['id'])):
                                 if str(secilen_m['odeme_tipi']).startswith("Cari - "):
                                     sil_c_adi = secilen_m['odeme_tipi'].replace("Cari - ", "")
-                                    db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", sil_c_adi).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("aciklama", f"Masraf: {secilen_m['aciklama']}"))
+                                    db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", sil_c_adi).eq("tarih", str(secilen_m['tarih'])).ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
                                 elif secilen_m['odeme_tipi'] in banka_liste:
-                                    db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", secilen_m['tarih']).eq("tutar", secilen_m['tutar']).eq("islem_tipi", "Para Çıkışı (Masraf)"))
-                                st.session_state.genel_mesaj = ("info", "Masraf silindi!")
+                                    db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", str(secilen_m['tarih'])).eq("islem_tipi", "Para Çıkışı (Masraf)").ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
+                                st.session_state.genel_mesaj = ("info", "Masraf tamamen silindi!")
                                 st.rerun()
 
     st.subheader("📋 Masraf Kayıtları ve Filtreleme")
@@ -923,8 +969,10 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                             with cg:
                                 if st.form_submit_button("Güncelle"):
                                     if sec_i['islem_tipi'] == "Ödeme Yaptık (Borç Düşer)" and sec_i.get('odeme_tipi') in b_liste:
-                                        db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", sec_i['tarih']).eq("tutar", sec_i['tutar']).eq("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}"))
+                                        db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", str(sec_i['tarih'])).eq("islem_tipi", "Para Çıkışı").ilike("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}%"))
+                                    
                                     db_yaz(supabase.table("cari_islemler").update({"tarih": str(y_tarih), "islem_tipi": y_tip, "tutar": y_tutar, "aciklama": y_ack, "odeme_tipi": y_odeme if y_tip == "Ödeme Yaptık (Borç Düşer)" else "- Yok -"}).eq("id", sec_i['id']))
+                                    
                                     if y_tip == "Ödeme Yaptık (Borç Düşer)" and y_odeme in b_liste:
                                         db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(y_tarih), "hesap_adi": y_odeme, "islem_tipi": "Para Çıkışı", "karsi_hesap": sec_i['cari_adi'], "tutar": y_tutar, "aciklama": f"Cari Ödemesi: {y_ack}"}))
                                     st.session_state.genel_mesaj = ("success", "İşlem güncellendi!")
@@ -932,9 +980,10 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                             with cs:
                                 if st.form_submit_button("Sil"):
                                     if sec_i['islem_tipi'] == "Ödeme Yaptık (Borç Düşer)" and sec_i.get('odeme_tipi') in b_liste:
-                                        db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", sec_i['tarih']).eq("tutar", sec_i['tutar']).eq("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}"))
+                                        db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", str(sec_i['tarih'])).eq("islem_tipi", "Para Çıkışı").ilike("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}%"))
+                                    
                                     if db_yaz(supabase.table("cari_islemler").delete().eq("id", sec_i['id'])):
-                                        st.session_state.genel_mesaj = ("info", "İşlem silindi!")
+                                        st.session_state.genel_mesaj = ("info", "İşlem tamamen silindi!")
                                     st.rerun()
 
     elif alt_menu == "📋 Cari Ekstre":
