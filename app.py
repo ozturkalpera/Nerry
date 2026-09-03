@@ -566,7 +566,6 @@ elif menu == "Banka & Kart Yönetimi":
         hesaplar_db = db_oku(supabase.table("banka_hesaplari").select("*"))
         
         banka_isimleri_tam = []
-        
         if hesaplar_db and islemler_b:
             banka_isimleri_tam = [b['isim'] for b in hesaplar_db]
             hesap_sozluk = {b['isim']: {'Tip': b['tip'], 'Bakiye (Eksi İse Borç)': 0.0} for b in hesaplar_db}
@@ -586,7 +585,7 @@ elif menu == "Banka & Kart Yönetimi":
             df_bakiye['Bakiye (Eksi İse Borç)'] = df_bakiye['Bakiye (Eksi İse Borç)'].round(2)
             st.dataframe(df_bakiye, hide_index=True, use_container_width=True)
             
-            # --- BAKİYELİ HESAP EKSTRESİ (DÜZELTİLDİ) ---
+            # --- BAKİYELİ HESAP EKSTRESİ ---
             st.divider()
             st.subheader("🧾 Hesap Ekstresi (Bakiyeli Rapor)")
             if banka_isimleri_tam:
@@ -606,8 +605,9 @@ elif menu == "Banka & Kart Yönetimi":
                         df_e = pd.DataFrame(hesap_hareketleri)
                         df_e['tarih_dt'] = pd.to_datetime(df_e['tarih'])
                         
-                        # İşlemleri kronolojik ve kayıt sırasına göre diz (Eskiden Yeniye doğru matematik yapmak için)
-                        df_e = df_e.sort_values(by=["tarih_dt", "id"], ascending=[True, True]).reset_index(drop=True)
+                        # İşlemleri kronolojik diziyoruz ki bakiye matematiksel olarak dünden bugüne düzgün aksın.
+                        df_e['is_acilis'] = df_e['islem'].apply(lambda x: 0 if x == 'Açılış' else 1)
+                        df_e = df_e.sort_values(by=["tarih_dt", "is_acilis", "id"], ascending=[True, True, True]).reset_index(drop=True)
                         
                         bakiye_list = []
                         bakiye = 0.0
@@ -618,10 +618,9 @@ elif menu == "Banka & Kart Yönetimi":
                         df_e['Bakiye'] = bakiye_list
                         df_e['tarih'] = df_e['tarih_dt'].dt.date
                         
-                        # Gösterim için tam tersine çevir (Yeniden -> Eskiye, en güncel bakiye en üstte)
-                        df_e = df_e.sort_values(by=["tarih_dt", "id"], ascending=[False, False]).drop(columns=['tarih_dt', 'id'])
+                        # Kullanıcının göreceği şekli yeniden eskiye çevir (En güncel bakiye en üstte dursun)
+                        df_e = df_e.sort_values(by=["tarih_dt", "is_acilis", "id"], ascending=[False, False, False]).drop(columns=['tarih_dt', 'is_acilis', 'id'])
                         
-                        # Sütunlarda da yuvarlama yapalım
                         df_e['Giriş'] = df_e['Giriş'].round(2)
                         df_e['Çıkış'] = df_e['Çıkış'].round(2)
                         
@@ -1286,6 +1285,11 @@ elif menu == "Kasa Yönetimi (Virman)":
     # --- KASA HAREKETLERİ DÖKÜMÜ ---
     st.divider()
     st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
+    
+    cirolar_all = db_oku(supabase.table("ciro").select("*"))
+    masraflar_all = db_oku(supabase.table("masraf").select("*"))
+    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
+    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
     
     kasa_dokum = []
     
