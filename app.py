@@ -247,8 +247,8 @@ if not st.session_state.giris_yapildi:
 # --- SOL MENÜ ---
 st.sidebar.title(f"Hoşgeldin, {st.session_state.rol}")
 menu = st.sidebar.radio("Menü", [
-    "Günlük Dükkan Cirosu", 
     "Adisyo (Excel) İçe Aktar",
+    "Günlük Dükkan Cirosu", 
     "Yemek Sepeti Yönetimi", 
     "Trendyol Yönetimi", 
     "Banka & Kart Yönetimi",
@@ -417,9 +417,9 @@ if menu == "Adisyo (Excel) İçe Aktar":
     st.header("📥 Adisyo Excel İçe Aktar (Günlük Satışlar)")
     bildirim_goster()
     
-    st.info("Adisyo'dan aldığınız satış raporunu yükleyin. Sistem, 'Geliş Kanalı' ve ödeme yöntemlerini analiz edip Ciro ve Platform kayıtlarınızı otomatik hazırlar. Onayladığınızda hepsi tek seferde sisteme işlenir.")
+    st.info("Adisyo'dan indirdiğiniz Excel satış raporunu yükleyin. Sistem, 'Geliş Kanalı' ve belirlediğiniz ödeme yöntemlerini analiz edip Ciro ve Platform kayıtlarınızı otomatik ayırır.")
     
-    uploaded_file = st.file_uploader("Adisyo Satış Raporu (Excel)", type=["xlsx", "xls"])
+    uploaded_file = st.file_uploader("Adisyo Satış Raporu Yükle (Excel)", type=["xlsx", "xls"])
     
     if uploaded_file is not None:
         try:
@@ -432,22 +432,28 @@ if menu == "Adisyo (Excel) İçe Aktar":
                     if keyword.lower() in str(c).lower(): return i
                 return 0
                 
+            st.markdown("### Sütun Eşleştirme (Otomatik Tanınanları Kontrol Edin)")
             c1, c2, c3, c4 = st.columns(4)
             with c1: c_kanal = st.selectbox("Geliş Kanalı Sütunu", cols, index=match_col("kanal"))
             with c2: c_nakit = st.selectbox("Nakit Ödeme Sütunu", cols, index=match_col("nakit"))
-            with c3: c_kk = st.selectbox("Kredi Kartı Sütunu", cols, index=match_col("kredi"))
-            with c4: c_online = st.selectbox("Entegrasyon/Online Sütunu", cols, index=match_col("entegr") or match_col("online"))
+            with c3: c_kk = st.selectbox("Kredi Kartı Sütunu", cols, index=match_col("kredi") or match_col("kart"))
+            with c4: c_pavo_nakit = st.selectbox("Pavo Nakit Sütunu", cols, index=match_col("pavo nakit"))
+            
+            c5, c6, c7, c8 = st.columns(4)
+            with c5: c_pavo_kk = st.selectbox("Pavo Kredi Kartı Sütunu", cols, index=match_col("pavo kredi") or match_col("pavo kart"))
+            with c6: c_ys_on = st.selectbox("YS Online Sütunu", cols, index=match_col("ys online") or match_col("yemek"))
+            with c7: c_ty_on = st.selectbox("Trendyol Online Sütunu", cols, index=match_col("trendyol online") or match_col("ty online"))
             
             st.divider()
             d1, d2 = st.columns(2)
             with d1: islem_tarihi = st.date_input("İşlem Tarihi (Bu Satışlar Hangi Güne Ait?)", datetime.date.today())
-            with d2: hedef_kasa = st.selectbox("Nakitler Hangi Kasaya Eklensin?", ["Kasa 1", "Kasa 2"])
+            with d2: hedef_kasa = st.selectbox("Dükkan Nakitleri Hangi Kasaya Eklensin?", ["Kasa 1", "Kasa 2"])
             
             if st.button("Verileri Analiz Et ve Önizleme Oluştur", type="primary"):
                 if c_kanal == "- Yok -":
-                    st.error("Geliş Kanalı sütununu seçmelisiniz!")
+                    st.error("Lütfen 'Geliş Kanalı' sütununu mutlaka seçin!")
                 else:
-                    c_n = 0.0; c_k = 0.0
+                    c_n = 0.0; c_k = 0.0; c_pn = 0.0; c_pk = 0.0
                     ys_on = 0.0; ys_kap = 0.0
                     ty_on = 0.0; ty_kap = 0.0
                     
@@ -455,62 +461,70 @@ if menu == "Adisyo (Excel) İçe Aktar":
                         kanal = str(row[c_kanal]).lower() if c_kanal != "- Yok -" else ""
                         n_val = safe_float(row[c_nakit]) if c_nakit != "- Yok -" else 0.0
                         k_val = safe_float(row[c_kk]) if c_kk != "- Yok -" else 0.0
-                        o_val = safe_float(row[c_online]) if c_online != "- Yok -" else 0.0
+                        pn_val = safe_float(row[c_pavo_nakit]) if c_pavo_nakit != "- Yok -" else 0.0
+                        pk_val = safe_float(row[c_pavo_kk]) if c_pavo_kk != "- Yok -" else 0.0
+                        ys_o_val = safe_float(row[c_ys_on]) if c_ys_on != "- Yok -" else 0.0
+                        ty_o_val = safe_float(row[c_ty_on]) if c_ty_on != "- Yok -" else 0.0
                         
+                        ys_on += ys_o_val
+                        ty_on += ty_o_val
+                        c_pn += pn_val
+                        c_pk += pk_val
+                        
+                        # Eğer sipariş yemek sepeti ise, nakit ve kk tutarı YS Kapıda Ödemedir. Dükkan cirosu DEĞİLDİR.
                         if "yemek sepeti" in kanal or "deliveryhero" in kanal:
-                            ys_on += o_val
                             ys_kap += (n_val + k_val)
-                            c_n += n_val
-                            c_k += k_val
+                        # Eğer Trendyol ise, nakit ve kk tutarı Trendyol Kapıda Ödemedir.
                         elif "trendyol" in kanal:
-                            ty_on += o_val
                             ty_kap += (n_val + k_val)
-                            c_n += n_val
-                            c_k += k_val
                         else:
+                            # Diğer tüm kanallar (Gel-Al, Masa vb.) dükkan cirosudur.
                             c_n += n_val
                             c_k += k_val
                             
-                    st.session_state['adisyo_ciro'] = [{"Tarih": str(islem_tarihi), "Kasa": hedef_kasa, "Nakit": round(c_n,2), "Kredi Kartı": round(c_k,2), "Pavo Nakit": 0.0, "Pavo Kredi": 0.0, "Ödenmez": 0.0}]
+                    st.session_state['adisyo_ciro'] = [{"Tarih": str(islem_tarihi), "Kasa": hedef_kasa, "Nakit": round(c_n,2), "Kredi Kartı": round(c_k,2), "Pavo Nakit": round(c_pn,2), "Pavo Kredi": round(c_pk,2), "Ödenmez": 0.0}]
                     st.session_state['adisyo_ys'] = [{"Tarih": str(islem_tarihi), "Online Ödeme": round(ys_on,2), "Kapıda Ödeme": round(ys_kap,2)}]
                     st.session_state['adisyo_ty'] = [{"Tarih": str(islem_tarihi), "Online Ödeme": round(ty_on,2), "Kapıda Ödeme": round(ty_kap,2)}]
                     
         except Exception as e:
-            st.error(f"Dosya okuma hatası: {e}")
+            st.error(f"Dosya okuma veya ayrıştırma hatası: {e}")
             
     if 'adisyo_ciro' in st.session_state:
         st.divider()
         st.subheader("📝 İşlem Önizlemesi ve Düzenleme")
-        st.info("Aşağıdaki veriler Excel'den çekildi. Gerekirse kutulara tıklayarak tutarları elle değiştirebilirsiniz. Her şey doğruysa en alttaki butona basarak sisteme aktarın.")
+        st.info("Aşağıdaki veriler Excel'den ayrıştırıldı. Gerekirse kutuların içindeki rakamlara tıklayarak elle son düzeltmeleri yapabilirsiniz.")
         
-        st.write("### 🏠 Günlük Dükkan Cirosu (Platform Kapıda Ödemeleri Eklenmiş Hali)")
+        st.write("### 🏠 Günlük Dükkan Cirosu (Platform Ödemeleri Hariç Tutulmuş Net Ciro)")
         df_ciro_edit = st.data_editor(pd.DataFrame(st.session_state['adisyo_ciro']), hide_index=True, use_container_width=True, key="edit_ciro")
         
         c1, c2 = st.columns(2)
         with c1:
-            st.write("### 🍔 Yemek Sepeti")
+            st.write("### 🍔 Yemek Sepeti Satışları")
             df_ys_edit = st.data_editor(pd.DataFrame(st.session_state['adisyo_ys']), hide_index=True, use_container_width=True, key="edit_ys")
         with c2:
-            st.write("### 🛍️ Trendyol")
+            st.write("### 🛍️ Trendyol Satışları")
             df_ty_edit = st.data_editor(pd.DataFrame(st.session_state['adisyo_ty']), hide_index=True, use_container_width=True, key="edit_ty")
             
-        if st.button("✅ Onayla ve Sistemdeki Tüm Kayıtlara Aktar", type="primary"):
-            # 1. CİRO KAYDI
+        if st.button("✅ Tablolardaki Verileri Onayla ve Sisteme Aktar", type="primary"):
             c_row = df_ciro_edit.iloc[0]
             tar_c = str(c_row['Tarih'])
+            
+            # Ciro çakışma kontrolü
             if db_oku(supabase.table("ciro").select("id").eq("tarih", tar_c)):
-                st.error("HATA: Bu tarih için Dükkan Cirosu zaten girilmiş! Aktarım iptal edildi.")
+                st.error(f"HATA: {tar_c} tarihi için Dükkan Cirosu zaten girilmiş! Eski kaydı silmeden yenisini aktaramazsınız.")
             else:
+                # 1. Ciro İşlemi
                 db_yaz(supabase.table("ciro").insert({
                     "tarih": tar_c, "kasa": c_row['Kasa'], "nakit": float(c_row['Nakit']), "kredi_karti": float(c_row['Kredi Kartı']),
                     "pavo_nakit": float(c_row['Pavo Nakit']), "pavo_kredi": float(c_row['Pavo Kredi']), "odenmez": float(c_row['Ödenmez'])
                 }))
                 
-                # 2. PLATFORM KAYITLARI
+                # 2. Platform İşlemleri
                 def plat_islet(p_adi, r_data):
                     tar_p = str(r_data['Tarih'])
+                    # Platform çakışma kontrolü
                     if db_oku(supabase.table("platform_satis").select("id").eq("platform", p_adi).eq("tarih", tar_p)):
-                        st.warning(f"Uyarı: {p_adi} için bu tarihte zaten kayıt var, bu platform atlandı.")
+                        st.warning(f"Uyarı: {p_adi} için {tar_p} tarihinde zaten satış kaydı var, bu platform atlandı.")
                         return
                         
                     for o_tip, tutar in [("Online", float(r_data['Online Ödeme'])), ("Kapıda Ödeme", float(r_data['Kapıda Ödeme']))]:
@@ -530,7 +544,7 @@ if menu == "Adisyo (Excel) İçe Aktar":
                                     "kesinti": kes, "net": net, "tahsilat_tarihi": str(t_tar), "durum": "Bekliyor"
                                 }))
                             else:
-                                st.error(f"{p_adi} {o_tip} için komisyon ayarı bulunamadığından aktarılamadı!")
+                                st.error(f"HATA: {p_adi} ({o_tip}) için komisyon ayarı bulunamadığından sisteme aktarılamadı!")
 
                 plat_islet("Yemek Sepeti", df_ys_edit.iloc[0])
                 plat_islet("Trendyol", df_ty_edit.iloc[0])
@@ -595,9 +609,6 @@ elif menu == "Günlük Dükkan Cirosu":
         for col in ['nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']:
             df_ciro[col] = pd.to_numeric(df_ciro[col], errors='coerce').fillna(0).round(2)
         st.dataframe(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
-
-elif menu == "Yemek Sepeti Yönetimi": platform_sayfasi("Yemek Sepeti")
-elif menu == "Trendyol Yönetimi": platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
@@ -871,8 +882,10 @@ elif menu == "Banka & Kart Yönetimi":
                                 for i, row in df_yuk.iterrows():
                                     t_val = row[col_tar]
                                     ack_val = str(row[col_ack])
-                                    g_tutar = safe_float(row[col_gir]) if col_gir != "Yok" else 0.0
-                                    c_tutar = safe_float(row[col_cik]) if col_cik != "Yok" else 0.0
+                                    g_tutar = 0.0
+                                    c_tutar = 0.0
+                                    if col_gir != "Yok" and not pd.isna(row[col_gir]): g_tutar = round(float(str(row[col_gir]).replace(',', '.')), 2)
+                                    if col_cik != "Yok" and not pd.isna(row[col_cik]): c_tutar = round(float(str(row[col_cik]).replace(',', '.')), 2)
                                     
                                     if g_tutar > 0:
                                         tutar = g_tutar
