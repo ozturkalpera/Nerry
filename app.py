@@ -29,6 +29,26 @@ def excel_indir(df):
     except ModuleNotFoundError:
         return df.to_csv(index=False).encode('utf-8-sig'), "csv", "text/csv"
 
+# --- ZAMAN DAMGASI (CREATED_AT) FONKSİYONU ---
+def formatla_zaman(col):
+    dt_col = pd.to_datetime(col, errors='coerce')
+    try:
+        return dt_col.dt.tz_convert('Europe/Istanbul').dt.strftime('%d.%m.%Y %H:%M').fillna('-')
+    except TypeError:
+        return dt_col.dt.strftime('%d.%m.%Y %H:%M').fillna('-')
+    except Exception:
+        return col
+
+def zaman_sutunlari_ekle(df, mevcut_sutunlar):
+    ek_sutunlar = mevcut_sutunlar.copy()
+    if 'created_at' in df.columns:
+        df['İşlenme Zamanı'] = formatla_zaman(df['created_at'])
+        ek_sutunlar.append('İşlenme Zamanı')
+    if 'updated_at' in df.columns:
+        df['Düzenleme Zamanı'] = formatla_zaman(df['updated_at'])
+        ek_sutunlar.append('Düzenleme Zamanı')
+    return df, ek_sutunlar
+
 # --- GÜVENLİ VERİTABANI FONKSİYONLARI ---
 def db_oku(sorgu):
     try:
@@ -85,12 +105,10 @@ def platform_kaydet_cb(plat_adi):
             ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", plat_adi).eq("odeme_tipi", o_tip))
             if len(ayar_getir) > 0:
                 ayar = ayar_getir[0]
-                
                 k_tutari = round(tutar * (float(ayar['komisyon']) / 100), 2)
                 s_tutari = round((tutar / 1.10) * (float(ayar['stopaj']) / 100), 2)
                 kes = round(k_tutari + s_tutari, 2)
                 net_t = round(tutar - kes if o_tip == "Online" else -kes, 2)
-                
                 t_tarihi = tarih + datetime.timedelta(days=int(ayar['vade']))
                 
                 veri = {
@@ -290,7 +308,6 @@ def platform_sayfasi(platform_adi):
         with st.expander(f"✏️ {platform_adi} Kaydını Düzenle veya Sil", expanded=False):
             satislar_db = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).order("tarih", desc=True))
             if satislar_db:
-                # Güvenli Sözlük Oluşturma (Duplicate Option hatasına karşı ID eklendi)
                 secenekler_ps = {f"{s['tarih']} | {s.get('odeme_tipi','')} | Brüt: {s.get('brut',0)} ₺ | Durum: {s.get('durum','')} (ID: {s['id']})": s for s in satislar_db}
                 secilen_ps_str = st.selectbox("İşlem Yapılacak Kaydı Seçin", ["Lütfen bir kayıt seçin..."] + list(secenekler_ps.keys()), key=f"{platform_adi}_duz_select")
                 if secilen_ps_str != "Lütfen bir kayıt seçin...":
@@ -298,10 +315,8 @@ def platform_sayfasi(platform_adi):
                     with st.form(f"{platform_adi}_duzenle_form"):
                         try: ps_tarih = datetime.datetime.strptime(secilen_ps['tarih'], '%Y-%m-%d').date()
                         except: ps_tarih = datetime.date.today()
-                        
                         y_ps_tarih = st.date_input("Tarih", value=ps_tarih)
                         
-                        # Güvenli index bulma
                         odm_val = secilen_ps.get('odeme_tipi', 'Online')
                         if odm_val not in ["Online", "Kapıda Ödeme"]: odm_val = "Online"
                         y_ps_odeme = st.selectbox("Ödeme Tipi", ["Online", "Kapıda Ödeme"], index=["Online", "Kapıda Ödeme"].index(odm_val))
@@ -335,8 +350,6 @@ def platform_sayfasi(platform_adi):
         bekleyenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Bekliyor"))
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
-            
-            # --- EKSİK SÜTUNLARI GÜVENLİ ŞEKİLDE OLUŞTURMA (KeyError Engeli) ---
             for col in ['brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'odeme_tipi', 'tahsilat_tarihi']:
                 if col not in df.columns:
                     if col in ['odeme_tipi', 'tahsilat_tarihi']: df[col] = ""
@@ -346,12 +359,20 @@ def platform_sayfasi(platform_adi):
             df['komisyon_tutari'] = pd.to_numeric(df['komisyon_tutari'], errors='coerce').fillna(0).round(2)
             df['stopaj_tutari'] = pd.to_numeric(df['stopaj_tutari'], errors='coerce').fillna(0).round(2)
             df['net'] = pd.to_numeric(df['net'], errors='coerce').fillna(0).round(2)
+            
+            z_goster = st.toggle("⏱️ İşlenme Zamanlarını Göster", key=f"{platform_adi}_bek_zg")
+            gosterim_sutunlar = ['id', 'tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']
+            if z_goster: df, gosterim_sutunlar = zaman_sutunlari_ekle(df, gosterim_sutunlar)
+            
             df.insert(0, "Seç", False)
+            gosterim_sutunlar.insert(0, "Seç")
+            
+            disabled_cols = ['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'İşlenme Zamanı', 'Düzenleme Zamanı']
             
             edited_df = st.data_editor(
-                df[['Seç', 'id', 'tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi']],
+                df[gosterim_sutunlar],
                 column_config={"Seç": st.column_config.CheckboxColumn("Tik (Seç)", default=False), "id": None, "brut": st.column_config.NumberColumn("Brüt", format="%.2f ₺"), "komisyon_tutari": st.column_config.NumberColumn("Komisyon", format="%.2f ₺"), "stopaj_tutari": st.column_config.NumberColumn("Stopaj", format="%.2f ₺"), "net": st.column_config.NumberColumn("Net Yatan", format="%.2f ₺")},
-                disabled=['tarih', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi'],
+                disabled=disabled_cols,
                 hide_index=True, use_container_width=True, key=f"{platform_adi}_editor"
             )
             secilenler = edited_df[edited_df["Seç"] == True]
@@ -399,11 +420,15 @@ def platform_sayfasi(platform_adi):
 
             df_odenen['net'] = pd.to_numeric(df_odenen['net'], errors='coerce').fillna(0).round(2)
             df_odenen['brut'] = pd.to_numeric(df_odenen['brut'], errors='coerce').fillna(0).round(2)
-            st.dataframe(df_odenen[['tarih', 'odeme_tipi', 'brut', 'net', 'tahsilat_tarihi']], hide_index=True, use_container_width=True)
+            
+            z_goster2 = st.toggle("⏱️ İşlenme Zamanlarını Göster", key=f"{platform_adi}_tah_zg")
+            gosterim_odn = ['tarih', 'odeme_tipi', 'brut', 'net', 'tahsilat_tarihi']
+            if z_goster2: df_odenen, gosterim_odn = zaman_sutunlari_ekle(df_odenen, gosterim_odn)
+            
+            st.dataframe(df_odenen[gosterim_odn], hide_index=True, use_container_width=True)
             
             with st.expander("↩️ Tahsilatı Geri Al (Yanlış Aktarımlar İçin)", expanded=False):
                 st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz.")
-                # Güvenli sözlük ve Duplicate ID engeli
                 secenekler_o = {f"{o['tarih']} | {o.get('odeme_tipi','')} | Brüt: {o['brut']} ₺ | Net: {o['net']} ₺ (ID:{o['id']})": o for _, o in df_odenen.iterrows()}
                 sec_o_str = st.selectbox("Geri Alınacak Kaydı Seçin", ["Lütfen seçin..."] + list(secenekler_o.keys()), key=f"{platform_adi}_gerial")
                 if sec_o_str != "Lütfen seçin...":
@@ -620,11 +645,16 @@ elif menu == "Günlük Dükkan Cirosu":
     st.subheader("📋 Geçmiş Ciro Kayıtları")
     cirolar = db_oku(supabase.table("ciro").select("*").order("tarih", desc=True))
     if cirolar:
+        z_goster_c = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="ciro_zg")
         df_ciro = pd.DataFrame(cirolar)
         for col in ['nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']:
             if col not in df_ciro.columns: df_ciro[col] = 0.0
             df_ciro[col] = pd.to_numeric(df_ciro[col], errors='coerce').fillna(0).round(2)
-        st.dataframe(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
+            
+        gosterim_ciro = ['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']
+        if z_goster_c: df_ciro, gosterim_ciro = zaman_sutunlari_ekle(df_ciro, gosterim_ciro)
+            
+        st.dataframe(df_ciro[gosterim_ciro], hide_index=True, use_container_width=True)
 
 elif menu == "Yemek Sepeti Yönetimi":
     platform_sayfasi("Yemek Sepeti")
@@ -758,6 +788,8 @@ elif menu == "Banka & Kart Yönetimi":
             
             st.divider()
             st.subheader("🧾 Hesap Ekstresi (Bakiyeli Rapor)")
+            z_goster_e = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="banka_eks_zg")
+            
             if banka_isimleri_tam:
                 secili_ekstre_hesabi = st.selectbox("Ekstresini Görmek İstediğiniz Hesabı Seçin", ["Lütfen seçin..."] + banka_isimleri_tam)
                 if secili_ekstre_hesabi != "Lütfen seçin...":
@@ -765,11 +797,11 @@ elif menu == "Banka & Kart Yönetimi":
                     for i in islemler_b:
                         if i['hesap_adi'] == secili_ekstre_hesabi:
                             if i['islem_tipi'] in ["Açılış", "Para Girişi"]:
-                                hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": i['islem_tipi'], "aciklama": i.get('aciklama',''), "karsi_hesap": i.get('karsi_hesap',''), "Giriş": float(i['tutar']), "Çıkış": 0.0})
+                                hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": i['islem_tipi'], "aciklama": i.get('aciklama',''), "karsi_hesap": i.get('karsi_hesap',''), "Giriş": float(i['tutar']), "Çıkış": 0.0, "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
                             else:
-                                hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": i['islem_tipi'], "aciklama": i.get('aciklama',''), "karsi_hesap": i.get('karsi_hesap',''), "Giriş": 0.0, "Çıkış": float(i['tutar'])})
+                                hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": i['islem_tipi'], "aciklama": i.get('aciklama',''), "karsi_hesap": i.get('karsi_hesap',''), "Giriş": 0.0, "Çıkış": float(i['tutar']), "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
                         elif i.get('karsi_hesap') == secili_ekstre_hesabi and i['islem_tipi'] in ["Bankalar Arası Virman", "Kredi Kartı Borç Ödemesi"]:
-                            hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": f"{i['islem_tipi']} (Gelen)", "aciklama": i.get('aciklama',''), "karsi_hesap": i['hesap_adi'], "Giriş": float(i['tutar']), "Çıkış": 0.0})
+                            hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": f"{i['islem_tipi']} (Gelen)", "aciklama": i.get('aciklama',''), "karsi_hesap": i['hesap_adi'], "Giriş": float(i['tutar']), "Çıkış": 0.0, "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
                             
                     if hesap_hareketleri:
                         df_e = pd.DataFrame(hesap_hareketleri)
@@ -790,15 +822,18 @@ elif menu == "Banka & Kart Yönetimi":
                         df_e['Giriş'] = df_e['Giriş'].round(2)
                         df_e['Çıkış'] = df_e['Çıkış'].round(2)
                         
-                        st.dataframe(df_e[['tarih', 'islem', 'karsi_hesap', 'aciklama', 'Giriş', 'Çıkış', 'Bakiye']], hide_index=True, use_container_width=True)
+                        gosterim_ekstre = ['tarih', 'islem', 'karsi_hesap', 'aciklama', 'Giriş', 'Çıkış', 'Bakiye']
+                        if z_goster_e: df_e, gosterim_ekstre = zaman_sutunlari_ekle(df_e, gosterim_ekstre)
                         
-                        dosya_e, uzanti_e, mime_e = excel_indir(df_e[['tarih', 'islem', 'karsi_hesap', 'aciklama', 'Giriş', 'Çıkış', 'Bakiye']])
+                        st.dataframe(df_e[gosterim_ekstre], hide_index=True, use_container_width=True)
+                        dosya_e, uzanti_e, mime_e = excel_indir(df_e[gosterim_ekstre])
                         st.download_button(f"📥 {secili_ekstre_hesabi} Ekstresini İndir", data=dosya_e, file_name=f"{secili_ekstre_hesabi}_Ekstresi.{uzanti_e}", mime=mime_e, key="dl_ekstre")
                     else:
                         st.info("Bu hesaba ait kayıt bulunmuyor.")
 
             st.divider()
             st.subheader("📋 Tüm Banka ve Kart Hareketleri (Genel Döküm)")
+            z_goster_b = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="banka_genel_zg")
             
             banka_dokum_genel = []
             for i in islemler_b:
@@ -808,7 +843,9 @@ elif menu == "Banka & Kart Yönetimi":
                     "islem_tipi": i['islem_tipi'], 
                     "karsi_hesap": i.get('karsi_hesap', ''), 
                     "tutar": float(i['tutar']), 
-                    "aciklama": i.get('aciklama', '')
+                    "aciklama": i.get('aciklama', ''),
+                    "created_at": i.get('created_at'),
+                    "updated_at": i.get('updated_at')
                 })
                     
             df_islem_b = pd.DataFrame(banka_dokum_genel)
@@ -830,10 +867,13 @@ elif menu == "Banka & Kart Yönetimi":
                 if sec_islem_b: df_islem_b = df_islem_b[df_islem_b['islem_tipi'].isin(sec_islem_b)]
                 if ara_b: df_islem_b = df_islem_b[df_islem_b['aciklama'].str.contains(ara_b, case=False, na=False)]
 
-                st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+                gosterim_b = ['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']
+                if z_goster_b: df_islem_b, gosterim_b = zaman_sutunlari_ekle(df_islem_b, gosterim_b)
+
+                st.dataframe(df_islem_b[gosterim_b].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
                 st.info(f"📊 Ekranda filtrelenen toplam işlem sayısı: **{len(df_islem_b)}** | Toplam Tutar: **{df_islem_b['tutar'].sum():,.2f} ₺**")
                 
-                dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']])
+                dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[gosterim_b])
                 st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Tum_Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
 
     elif alt_menu == "📂 Excel İçe Aktar":
@@ -1050,6 +1090,7 @@ elif menu == "Masraf Girişi":
     st.subheader("📋 Masraf Kayıtları ve Filtreleme")
     masraflar = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
     if masraflar:
+        z_goster_m = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="masraf_zg")
         df_masraf = pd.DataFrame(masraflar)
         if 'tutar' not in df_masraf.columns: df_masraf['tutar'] = 0.0
         if 'odeme_tipi' not in df_masraf.columns: df_masraf['odeme_tipi'] = ""
@@ -1069,7 +1110,11 @@ elif menu == "Masraf Girişi":
         if sec_tip: df_masraf = df_masraf[df_masraf['masraf_tipi'].isin(sec_tip)]
         if sec_odeme: df_masraf = df_masraf[df_masraf['odeme_tipi'].isin(sec_odeme)]
         if aranan: df_masraf = df_masraf[df_masraf['aciklama'].str.contains(aranan, case=False, na=False)]
-        st.dataframe(df_masraf[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']], hide_index=True, use_container_width=True)
+        
+        gosterim_mas = ['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']
+        if z_goster_m: df_masraf, gosterim_mas = zaman_sutunlari_ekle(df_masraf, gosterim_mas)
+        
+        st.dataframe(df_masraf[gosterim_mas], hide_index=True, use_container_width=True)
         st.info(f"📊 Toplam Tutar: **{df_masraf['tutar'].sum():,.2f} ₺**")
 
 elif menu == "Cari (Tedarikçi) Yönetimi":
@@ -1141,9 +1186,7 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                     if sec_i_str != "Seçiniz...":
                         sec_i = secenekler_i[sec_i_str]
                         with st.form("islem_duz"):
-                            try: y_tarih = datetime.datetime.strptime(sec_i['tarih'], '%Y-%m-%d').date()
-                            except: y_tarih = datetime.date.today()
-                            y_tarih_val = st.date_input("Tarih", value=y_tarih)
+                            y_tarih = st.date_input("Tarih", value=datetime.datetime.strptime(sec_i['tarih'], '%Y-%m-%d').date())
                             
                             islem_tipi_val = sec_i.get('islem_tipi', 'Gelen Fatura (Bize Borç Yazar)')
                             if islem_tipi_val not in ["Gelen Fatura (Bize Borç Yazar)", "Ödeme Yaptık (Borç Düşer)"]: islem_tipi_val = "Gelen Fatura (Bize Borç Yazar)"
@@ -1162,10 +1205,10 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
                                     if str(sec_i.get('islem_tipi')) == "Ödeme Yaptık (Borç Düşer)" and str(sec_i.get('odeme_tipi')) in b_liste:
                                         db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", str(sec_i['tarih'])).eq("islem_tipi", "Para Çıkışı").ilike("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}%"))
                                     
-                                    db_yaz(supabase.table("cari_islemler").update({"tarih": str(y_tarih_val), "islem_tipi": y_tip, "tutar": y_tutar, "aciklama": y_ack, "odeme_tipi": y_odeme if y_tip == "Ödeme Yaptık (Borç Düşer)" else "- Yok -"}).eq("id", sec_i['id']))
+                                    db_yaz(supabase.table("cari_islemler").update({"tarih": str(y_tarih), "islem_tipi": y_tip, "tutar": y_tutar, "aciklama": y_ack, "odeme_tipi": y_odeme if y_tip == "Ödeme Yaptık (Borç Düşer)" else "- Yok -"}).eq("id", sec_i['id']))
                                     
                                     if y_tip == "Ödeme Yaptık (Borç Düşer)" and y_odeme in b_liste:
-                                        db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(y_tarih_val), "hesap_adi": y_odeme, "islem_tipi": "Para Çıkışı", "karsi_hesap": sec_i['cari_adi'], "tutar": y_tutar, "aciklama": f"Cari Ödemesi: {y_ack}"}))
+                                        db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(y_tarih), "hesap_adi": y_odeme, "islem_tipi": "Para Çıkışı", "karsi_hesap": sec_i['cari_adi'], "tutar": y_tutar, "aciklama": f"Cari Ödemesi: {y_ack}"}))
                                     st.session_state.genel_mesaj = ("success", "İşlem güncellendi!")
                                     st.rerun()
                             with cs:
@@ -1181,10 +1224,6 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
         islemler = db_oku(supabase.table("cari_islemler").select("*"))
         if islemler:
             df_i = pd.DataFrame(islemler)
-            if 'tutar' not in df_i.columns: df_i['tutar'] = 0.0
-            if 'odeme_tipi' not in df_i.columns: df_i['odeme_tipi'] = ""
-            if 'aciklama' not in df_i.columns: df_i['aciklama'] = ""
-            
             df_i['tutar'] = pd.to_numeric(df_i['tutar'], errors='coerce').fillna(0).round(2)
             
             fatura_toplam = df_i[df_i['islem_tipi'] == 'Gelen Fatura (Bize Borç Yazar)'].groupby('cari_adi')['tutar'].sum()
@@ -1198,6 +1237,7 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
             
             st.divider()
             st.subheader("Tüm Cari Hareketler Dökümü")
+            z_goster_c2 = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="cari_zg")
             df_i['odeme_tipi'] = df_i.get('odeme_tipi', '- Yok -')
             df_i['tarih'] = pd.to_datetime(df_i['tarih']).dt.date
             
@@ -1214,9 +1254,12 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
             if sec_tip_c: df_i = df_i[df_i['islem_tipi'].isin(sec_tip_c)]
             if ara_c: df_i = df_i[df_i['aciklama'].str.contains(ara_c, case=False, na=False)]
             
-            st.dataframe(df_i[['tarih', 'cari_adi', 'islem_tipi', 'tutar', 'odeme_tipi', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            gosterim_cari = ['tarih', 'cari_adi', 'islem_tipi', 'tutar', 'odeme_tipi', 'aciklama']
+            if z_goster_c2: df_i, gosterim_cari = zaman_sutunlari_ekle(df_i, gosterim_cari)
             
-            dosya_c, uzanti_c, mime_c = excel_indir(df_i[['tarih', 'cari_adi', 'islem_tipi', 'tutar', 'odeme_tipi', 'aciklama']])
+            st.dataframe(df_i[gosterim_cari].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+            
+            dosya_c, uzanti_c, mime_c = excel_indir(df_i[gosterim_cari])
             st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_c, file_name=f"Cari_Hareketleri.{uzanti_c}", mime=mime_c, key="dl_cari")
 
 elif menu == "Kasa Yönetimi (Virman)":
@@ -1477,21 +1520,21 @@ elif menu == "Kasa Yönetimi (Virman)":
         for c in cirolar_all:
             n_tutar = float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))
             if n_tutar > 0:
-                kasa_dokum.append({"Tarih": c['tarih'], "Kasa": c.get('kasa'), "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": n_tutar, "Açıklama": "Günlük Nakit Ciro"})
+                kasa_dokum.append({"Tarih": c['tarih'], "Kasa": c.get('kasa'), "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": n_tutar, "Açıklama": "Günlük Nakit Ciro", "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
                 
     if masraflar_all:
         for m in masraflar_all:
             o_tipi = str(m.get('odeme_tipi', ''))
             if o_tipi.startswith("Nakit - "):
                 k_adi = o_tipi.replace("Nakit - ", "")
-                kasa_dokum.append({"Tarih": m['tarih'], "Kasa": k_adi, "İşlem": "Masraf Çıkışı", "Yön": "Çıkış", "Tutar": float(m.get('tutar',0)), "Açıklama": m.get('aciklama', '')})
+                kasa_dokum.append({"Tarih": m['tarih'], "Kasa": k_adi, "İşlem": "Masraf Çıkışı", "Yön": "Çıkış", "Tutar": float(m.get('tutar',0)), "Açıklama": m.get('aciklama', ''), "created_at": m.get('created_at'), "updated_at": m.get('updated_at')})
                 
     if cari_islemler_all:
         for co in cari_islemler_all:
             o_tipi = str(co.get('odeme_tipi', ''))
             if o_tipi.startswith("Nakit - "):
                 k_adi = o_tipi.replace("Nakit - ", "")
-                kasa_dokum.append({"Tarih": co['tarih'], "Kasa": k_adi, "İşlem": "Cari Ödemesi", "Yön": "Çıkış", "Tutar": float(co.get('tutar',0)), "Açıklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}"})
+                kasa_dokum.append({"Tarih": co['tarih'], "Kasa": k_adi, "İşlem": "Cari Ödemesi", "Yön": "Çıkış", "Tutar": float(co.get('tutar',0)), "Açıklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}", "created_at": co.get('created_at'), "updated_at": co.get('updated_at')})
                 
     if islemler_all:
         for i in islemler_all:
@@ -1501,20 +1544,21 @@ elif menu == "Kasa Yönetimi (Virman)":
             a = i.get('alan')
             
             if tip in ['Açılış', 'Para Girişi (Sermaye)', 'Bankadan Çekilen']:
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "-"})
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "-", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
             elif tip == 'Eksik':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "Sayım Eksiği"})
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "Sayım Eksiği", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
             elif tip == 'Fazla':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "Sayım Fazlası"})
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "Sayım Fazlası", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
             elif tip == 'Bankaya Yatırılan':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "-"})
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "-", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
             elif tip == 'Virman':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": "Virman Çıkışı", "Yön": "Çıkış", "Tutar": tut, "Açıklama": f"Alıcı: {a}"})
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": "Virman Girişi", "Yön": "Giriş", "Tutar": tut, "Açıklama": f"Gönderen: {g}"})
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": "Virman Çıkışı", "Yön": "Çıkış", "Tutar": tut, "Açıklama": f"Alıcı: {a}", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": "Virman Girişi", "Yön": "Giriş", "Tutar": tut, "Açıklama": f"Gönderen: {g}", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
                 
     if kasa_dokum:
         df_kd = pd.DataFrame(kasa_dokum)
         df_kd['Tarih'] = pd.to_datetime(df_kd['Tarih']).dt.date
+        z_goster_k = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="kasa_zg")
         
         with st.expander("🔍 Kasa Filtreleme Paneli", expanded=True):
             f1, f2, f3 = st.columns(3)
@@ -1527,8 +1571,11 @@ elif menu == "Kasa Yönetimi (Virman)":
         if sec_kasa_k: df_kd = df_kd[df_kd['Kasa'].isin(sec_kasa_k)]
         if sec_islem_k: df_kd = df_kd[df_kd['İşlem'].isin(sec_islem_k)]
         
-        st.dataframe(df_kd.sort_values("Tarih", ascending=False), hide_index=True, use_container_width=True)
-        dosya_kd, uz_kd, mi_kd = excel_indir(df_kd)
+        gosterim_kasa = ['Tarih', 'Kasa', 'İşlem', 'Yön', 'Tutar', 'Açıklama']
+        if z_goster_k: df_kd, gosterim_kasa = zaman_sutunlari_ekle(df_kd, gosterim_kasa)
+        
+        st.dataframe(df_kd[gosterim_kasa].sort_values("Tarih", ascending=False), hide_index=True, use_container_width=True)
+        dosya_kd, uz_kd, mi_kd = excel_indir(df_kd[gosterim_kasa])
         st.download_button("📥 Kasa Dökümünü Excel'e İndir", data=dosya_kd, file_name=f"Kasa_Hareketleri.{uz_kd}", mime=mi_kd, key="dl_kasa")
     else:
         st.info("Kayıtlı kasa hareketi bulunmuyor.")
@@ -1690,6 +1737,7 @@ elif menu == "Personel & Puantaj":
         st.subheader("Geçmiş Puantaj ve İzin Kayıtları")
         puantajlar = db_oku(supabase.table("puantaj").select("*").order("tarih", desc=True))
         if puantajlar:
+            z_goster_p = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="puantaj_zg")
             df_puantaj = pd.DataFrame(puantajlar)
             df_puantaj['tarih'] = pd.to_datetime(df_puantaj['tarih']).dt.date
             
@@ -1708,10 +1756,13 @@ elif menu == "Personel & Puantaj":
             if secili_pers: df_puantaj = df_puantaj[df_puantaj['personel_adi'].isin(secili_pers)]
             if secili_durum: df_puantaj = df_puantaj[df_puantaj['durum'].isin(secili_durum)]
             
-            st.dataframe(df_puantaj[['tarih', 'personel_adi', 'durum', 'fazla_mesai_saati']], hide_index=True, use_container_width=True)
+            gosterim_puan = ['tarih', 'personel_adi', 'durum', 'fazla_mesai_saati']
+            if z_goster_p: df_puantaj, gosterim_puan = zaman_sutunlari_ekle(df_puantaj, gosterim_puan)
+            
+            st.dataframe(df_puantaj[gosterim_puan], hide_index=True, use_container_width=True)
             st.info(f"📊 Ekranda filtrelenen toplam kayıt sayısı: **{len(df_puantaj)}**")
             
-            dosya_p, uzanti_p, mime_p = excel_indir(df_puantaj[['tarih', 'personel_adi', 'durum', 'fazla_mesai_saati']])
+            dosya_p, uzanti_p, mime_p = excel_indir(df_puantaj[gosterim_puan])
             st.download_button(label="📥 Filtrelenmiş Kayıtları Excel'e İndir", data=dosya_p, file_name=f"Puantaj_Raporu.{uzanti_p}", mime=mime_p)
 
     elif alt_menu == "💰 Maaş Hesaplama":
@@ -1778,6 +1829,7 @@ elif menu == "Personel & Puantaj":
 
 elif menu == "Raporlar":
     st.header("📊 Sistem Raporları ve Excel Çıktıları")
+    z_goster_r = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Tüm Tablolarda Göster", key="rapor_zg")
     
     st.subheader("1. Yemek Sepeti ve Trendyol Satış Raporu")
     sat = db_oku(supabase.table("platform_satis").select("*"))
@@ -1787,8 +1839,11 @@ elif menu == "Raporlar":
             if col not in df_sat.columns: df_sat[col] = 0.0 if 'tutari' in col or col in ['brut', 'net'] else ''
             
         df_sat = df_sat.sort_values(by="tarih", ascending=False)
-        st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']], hide_index=True, use_container_width=True)
-        dosya_sat, uzanti_sat, mime_sat = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
+        gosterim_sat = ['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']
+        if z_goster_r: df_sat, gosterim_sat = zaman_sutunlari_ekle(df_sat, gosterim_sat)
+            
+        st.dataframe(df_sat[gosterim_sat], hide_index=True, use_container_width=True)
+        dosya_sat, uzanti_sat, mime_sat = excel_indir(df_sat[gosterim_sat])
         st.download_button(label="📥 Platform Satışlarını Excel'e İndir", data=dosya_sat, file_name=f"Platform_Satislar_Raporu.{uzanti_sat}", mime=mime_sat)
     
     st.divider()
@@ -1801,8 +1856,11 @@ elif menu == "Raporlar":
             if col not in df_cir.columns: df_cir[col] = 0.0 if col != 'kasa' else 'Kasa 1'
             
         df_cir = df_cir.sort_values(by="tarih", ascending=False)
-        st.dataframe(df_cir[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
-        dosya_cir, uzanti_cir, mime_cir = excel_indir(df_cir[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']])
+        gosterim_cir = ['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']
+        if z_goster_r: df_cir, gosterim_cir = zaman_sutunlari_ekle(df_cir, gosterim_cir)
+            
+        st.dataframe(df_cir[gosterim_cir], hide_index=True, use_container_width=True)
+        dosya_cir, uzanti_cir, mime_cir = excel_indir(df_cir[gosterim_cir])
         st.download_button(label="📥 Dükkan Cirosunu Excel'e İndir", data=dosya_cir, file_name=f"Dukkan_Cirosu_Raporu.{uzanti_cir}", mime=mime_cir)
 
     st.divider()
@@ -1815,6 +1873,9 @@ elif menu == "Raporlar":
             if col not in df_masraf_r.columns: df_masraf_r[col] = 0.0 if col == 'tutar' else ''
             
         df_masraf_r['masraf_tipi'] = df_masraf_r.get('masraf_tipi', 'Genel').fillna('Genel Masraf')
-        st.dataframe(df_masraf_r[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']], hide_index=True, use_container_width=True)
-        dosya_mas, uzanti_mas, mime_mas = excel_indir(df_masraf_r[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']])
+        gosterim_mas = ['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']
+        if z_goster_r: df_masraf_r, gosterim_mas = zaman_sutunlari_ekle(df_masraf_r, gosterim_mas)
+            
+        st.dataframe(df_masraf_r[gosterim_mas], hide_index=True, use_container_width=True)
+        dosya_mas, uzanti_mas, mime_mas = excel_indir(df_masraf_r[gosterim_mas])
         st.download_button(label="📥 Tüm Masrafları Excel'e İndir", data=dosya_mas, file_name=f"Masraflar_Raporu.{uzanti_mas}", mime=mime_mas)
