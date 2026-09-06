@@ -412,8 +412,7 @@ def platform_sayfasi(platform_adi):
                     st.session_state.genel_mesaj = ("success", "Ayarlar güncellendi!")
                     st.rerun()
 
-# --- MÜNÜ İŞLEMLERİ (TEK KOPYA) ---
-
+# --- MENÜ İÇERİKLERİ ---
 if menu == "Adisyo (Excel) İçe Aktar":
     st.header("📥 Adisyo Excel İçe Aktar (Günlük Satışlar)")
     bildirim_goster()
@@ -473,13 +472,11 @@ if menu == "Adisyo (Excel) İçe Aktar":
                         ys_on += ys_o_val
                         ty_on += ty_o_val
                         
-                        # Testten geçen kural: Tümü ciroyu günceller
                         c_n += n_val
                         c_k += k_val
                         c_pn += pn_val
                         c_pk += pk_val
                         
-                        # Eğer sipariş platform ise, nakit/kk ayrıca kapıda ödeme olarak hesaplanır
                         if "yemek sepeti" in kanal or "deliveryhero" in kanal or "ys" in kanal:
                             ys_kap += (n_val + k_val)
                         elif "trendyol" in kanal or "ty" in kanal:
@@ -512,20 +509,16 @@ if menu == "Adisyo (Excel) İçe Aktar":
             c_row = df_ciro_edit.iloc[0]
             tar_c = str(c_row['Tarih'])
             
-            # Ciro çakışma kontrolü
             if db_oku(supabase.table("ciro").select("id").eq("tarih", tar_c)):
                 st.error(f"HATA: {tar_c} tarihi için Dükkan Cirosu zaten girilmiş! Eski kaydı silmeden yenisini aktaramazsınız.")
             else:
-                # 1. Ciro İşlemi
                 db_yaz(supabase.table("ciro").insert({
                     "tarih": tar_c, "kasa": c_row['Kasa'], "nakit": float(c_row['Nakit']), "kredi_karti": float(c_row['Kredi Kartı']),
                     "pavo_nakit": float(c_row['Pavo Nakit']), "pavo_kredi": float(c_row['Pavo Kredi']), "odenmez": float(c_row['Ödenmez'])
                 }))
                 
-                # 2. Platform İşlemleri
                 def plat_islet(p_adi, r_data):
                     tar_p = str(r_data['Tarih'])
-                    # Platform çakışma kontrolü
                     if db_oku(supabase.table("platform_satis").select("id").eq("platform", p_adi).eq("tarih", tar_p)):
                         st.warning(f"Uyarı: {p_adi} için {tar_p} tarihinde zaten satış kaydı var, bu platform atlandı.")
                         return
@@ -612,12 +605,6 @@ elif menu == "Günlük Dükkan Cirosu":
         for col in ['nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']:
             df_ciro[col] = pd.to_numeric(df_ciro[col], errors='coerce').fillna(0).round(2)
         st.dataframe(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
-
-elif menu == "Yemek Sepeti Yönetimi":
-    platform_sayfasi("Yemek Sepeti")
-
-elif menu == "Trendyol Yönetimi":
-    platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
@@ -892,10 +879,8 @@ elif menu == "Banka & Kart Yönetimi":
                                 for i, row in df_yuk.iterrows():
                                     t_val = row[col_tar]
                                     ack_val = str(row[col_ack])
-                                    g_tutar = 0.0
-                                    c_tutar = 0.0
-                                    if col_gir != "Yok" and not pd.isna(row[col_gir]): g_tutar = round(float(str(row[col_gir]).replace(',', '.')), 2)
-                                    if col_cik != "Yok" and not pd.isna(row[col_cik]): c_tutar = round(float(str(row[col_cik]).replace(',', '.')), 2)
+                                    g_tutar = safe_float(row[col_gir]) if col_gir != "Yok" else 0.0
+                                    c_tutar = safe_float(row[col_cik]) if col_cik != "Yok" else 0.0
                                     
                                     if g_tutar > 0:
                                         tutar = g_tutar
@@ -1438,6 +1423,11 @@ elif menu == "Kasa Yönetimi (Virman)":
     st.divider()
     st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
     
+    cirolar_all = db_oku(supabase.table("ciro").select("*"))
+    masraflar_all = db_oku(supabase.table("masraf").select("*"))
+    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
+    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
+    
     kasa_dokum = []
     
     if cirolar_all:
@@ -1500,6 +1490,7 @@ elif menu == "Kasa Yönetimi (Virman)":
     else:
         st.info("Kayıtlı kasa hareketi bulunmuyor.")
 
+# --- PERSONEL MODÜLÜ ---
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
     bildirim_goster()
