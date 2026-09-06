@@ -412,7 +412,8 @@ def platform_sayfasi(platform_adi):
                     st.session_state.genel_mesaj = ("success", "Ayarlar güncellendi!")
                     st.rerun()
 
-# --- MENÜ İÇERİKLERİ ---
+# --- MÜNÜ İŞLEMLERİ (TEK KOPYA) ---
+
 if menu == "Adisyo (Excel) İçe Aktar":
     st.header("📥 Adisyo Excel İçe Aktar (Günlük Satışlar)")
     bildirim_goster()
@@ -427,22 +428,25 @@ if menu == "Adisyo (Excel) İçe Aktar":
             st.success("Excel başarıyla okundu! Lütfen aşağıdaki sütunları seçin:")
             cols = ["- Yok -"] + df_ad.columns.tolist()
             
-            def match_col(keyword):
+            def match_col(keywords, exclude=None):
                 for i, c in enumerate(cols):
-                    if keyword.lower() in str(c).lower(): return i
+                    c_lower = str(c).lower()
+                    if exclude and exclude in c_lower: continue
+                    for kw in keywords:
+                        if kw in c_lower: return i
                 return 0
                 
             st.markdown("### Sütun Eşleştirme (Otomatik Tanınanları Kontrol Edin)")
             c1, c2, c3, c4 = st.columns(4)
-            with c1: c_kanal = st.selectbox("Geliş Kanalı Sütunu", cols, index=match_col("kanal"))
-            with c2: c_nakit = st.selectbox("Nakit Ödeme Sütunu", cols, index=match_col("nakit"))
-            with c3: c_kk = st.selectbox("Kredi Kartı Sütunu", cols, index=match_col("kredi") or match_col("kart"))
-            with c4: c_pavo_nakit = st.selectbox("Pavo Nakit Sütunu", cols, index=match_col("pavo nakit"))
+            with c1: c_kanal = st.selectbox("Geliş Kanalı Sütunu", cols, index=match_col(["kanal", "gelis"]))
+            with c2: c_nakit = st.selectbox("Nakit Ödeme Sütunu", cols, index=match_col(["nakit"], exclude="pavo"))
+            with c3: c_kk = st.selectbox("Kredi Kartı Sütunu", cols, index=match_col(["kredi kartı", "kredi", "kart"], exclude="pavo"))
+            with c4: c_pavo_nakit = st.selectbox("Pavo Nakit Sütunu", cols, index=match_col(["pavo nakit"]))
             
             c5, c6, c7, c8 = st.columns(4)
-            with c5: c_pavo_kk = st.selectbox("Pavo Kredi Kartı Sütunu", cols, index=match_col("pavo kredi") or match_col("pavo kart"))
-            with c6: c_ys_on = st.selectbox("YS Online Sütunu", cols, index=match_col("ys online") or match_col("yemek"))
-            with c7: c_ty_on = st.selectbox("Trendyol Online Sütunu", cols, index=match_col("trendyol online") or match_col("ty online"))
+            with c5: c_pavo_kk = st.selectbox("Pavo Kredi Kartı Sütunu", cols, index=match_col(["pavo kredi", "pavo kart"]))
+            with c6: c_ys_on = st.selectbox("YS Online Sütunu", cols, index=match_col(["ys online", "yemek"]))
+            with c7: c_ty_on = st.selectbox("Trendyol Online Sütunu", cols, index=match_col(["trendyol online", "ty online"]))
             
             st.divider()
             d1, d2 = st.columns(2)
@@ -468,19 +472,18 @@ if menu == "Adisyo (Excel) İçe Aktar":
                         
                         ys_on += ys_o_val
                         ty_on += ty_o_val
+                        
+                        # Testten geçen kural: Tümü ciroyu günceller
+                        c_n += n_val
+                        c_k += k_val
                         c_pn += pn_val
                         c_pk += pk_val
                         
-                        # Eğer sipariş yemek sepeti ise, nakit ve kk tutarı YS Kapıda Ödemedir. Dükkan cirosu DEĞİLDİR.
-                        if "yemek sepeti" in kanal or "deliveryhero" in kanal:
+                        # Eğer sipariş platform ise, nakit/kk ayrıca kapıda ödeme olarak hesaplanır
+                        if "yemek sepeti" in kanal or "deliveryhero" in kanal or "ys" in kanal:
                             ys_kap += (n_val + k_val)
-                        # Eğer Trendyol ise, nakit ve kk tutarı Trendyol Kapıda Ödemedir.
-                        elif "trendyol" in kanal:
+                        elif "trendyol" in kanal or "ty" in kanal:
                             ty_kap += (n_val + k_val)
-                        else:
-                            # Diğer tüm kanallar (Gel-Al, Masa vb.) dükkan cirosudur.
-                            c_n += n_val
-                            c_k += k_val
                             
                     st.session_state['adisyo_ciro'] = [{"Tarih": str(islem_tarihi), "Kasa": hedef_kasa, "Nakit": round(c_n,2), "Kredi Kartı": round(c_k,2), "Pavo Nakit": round(c_pn,2), "Pavo Kredi": round(c_pk,2), "Ödenmez": 0.0}]
                     st.session_state['adisyo_ys'] = [{"Tarih": str(islem_tarihi), "Online Ödeme": round(ys_on,2), "Kapıda Ödeme": round(ys_kap,2)}]
@@ -494,7 +497,7 @@ if menu == "Adisyo (Excel) İçe Aktar":
         st.subheader("📝 İşlem Önizlemesi ve Düzenleme")
         st.info("Aşağıdaki veriler Excel'den ayrıştırıldı. Gerekirse kutuların içindeki rakamlara tıklayarak elle son düzeltmeleri yapabilirsiniz.")
         
-        st.write("### 🏠 Günlük Dükkan Cirosu (Platform Ödemeleri Hariç Tutulmuş Net Ciro)")
+        st.write("### 🏠 Günlük Dükkan Cirosu (Platform Ödemeleri Dahil Tüm Nakit/Kartlar)")
         df_ciro_edit = st.data_editor(pd.DataFrame(st.session_state['adisyo_ciro']), hide_index=True, use_container_width=True, key="edit_ciro")
         
         c1, c2 = st.columns(2)
@@ -609,6 +612,12 @@ elif menu == "Günlük Dükkan Cirosu":
         for col in ['nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']:
             df_ciro[col] = pd.to_numeric(df_ciro[col], errors='coerce').fillna(0).round(2)
         st.dataframe(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
+
+elif menu == "Yemek Sepeti Yönetimi":
+    platform_sayfasi("Yemek Sepeti")
+
+elif menu == "Trendyol Yönetimi":
+    platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
@@ -788,28 +797,29 @@ elif menu == "Banka & Kart Yönetimi":
                 })
                     
             df_islem_b = pd.DataFrame(banka_dokum_genel)
-            df_islem_b['tutar'] = df_islem_b['tutar'].round(2)
-            df_islem_b['tarih'] = pd.to_datetime(df_islem_b['tarih']).dt.date
-            
-            with st.expander("🔍 Genel Dökümü Filtrele", expanded=True):
-                c1, c2, c3, c4 = st.columns(4)
-                with c1: t_aralik_b = st.date_input("Tarih Aralığı", [df_islem_b['tarih'].min(), df_islem_b['tarih'].max()], key="filt_b_tar")
-                with c2: sec_hesap = st.multiselect("Hesap / Kart Seç", df_islem_b['hesap_adi'].unique().tolist(), key="filt_b_hesap")
-                with c3: sec_islem_b = st.multiselect("İşlem Tipi", df_islem_b['islem_tipi'].unique().tolist(), key="filt_b_tip")
-                with c4: ara_b = st.text_input("Açıklama Ara", key="filt_b_ara")
-            
-            if len(t_aralik_b) == 2: df_islem_b = df_islem_b[(df_islem_b['tarih'] >= t_aralik_b[0]) & (df_islem_b['tarih'] <= t_aralik_b[1])]
-            elif len(t_aralik_b) == 1: df_islem_b = df_islem_b[df_islem_b['tarih'] == t_aralik_b[0]]
-            
-            if sec_hesap: df_islem_b = df_islem_b[df_islem_b['hesap_adi'].isin(sec_hesap)]
-            if sec_islem_b: df_islem_b = df_islem_b[df_islem_b['islem_tipi'].isin(sec_islem_b)]
-            if ara_b: df_islem_b = df_islem_b[df_islem_b['aciklama'].str.contains(ara_b, case=False, na=False)]
+            if not df_islem_b.empty:
+                df_islem_b['tutar'] = df_islem_b['tutar'].round(2)
+                df_islem_b['tarih'] = pd.to_datetime(df_islem_b['tarih']).dt.date
+                
+                with st.expander("🔍 Genel Dökümü Filtrele", expanded=True):
+                    c1, c2, c3, c4 = st.columns(4)
+                    with c1: t_aralik_b = st.date_input("Tarih Aralığı", [df_islem_b['tarih'].min(), df_islem_b['tarih'].max()], key="filt_b_tar")
+                    with c2: sec_hesap = st.multiselect("Hesap / Kart Seç", df_islem_b['hesap_adi'].unique().tolist(), key="filt_b_hesap")
+                    with c3: sec_islem_b = st.multiselect("İşlem Tipi", df_islem_b['islem_tipi'].unique().tolist(), key="filt_b_tip")
+                    with c4: ara_b = st.text_input("Açıklama Ara", key="filt_b_ara")
+                
+                if len(t_aralik_b) == 2: df_islem_b = df_islem_b[(df_islem_b['tarih'] >= t_aralik_b[0]) & (df_islem_b['tarih'] <= t_aralik_b[1])]
+                elif len(t_aralik_b) == 1: df_islem_b = df_islem_b[df_islem_b['tarih'] == t_aralik_b[0]]
+                
+                if sec_hesap: df_islem_b = df_islem_b[df_islem_b['hesap_adi'].isin(sec_hesap)]
+                if sec_islem_b: df_islem_b = df_islem_b[df_islem_b['islem_tipi'].isin(sec_islem_b)]
+                if ara_b: df_islem_b = df_islem_b[df_islem_b['aciklama'].str.contains(ara_b, case=False, na=False)]
 
-            st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
-            st.info(f"📊 Ekranda filtrelenen toplam işlem sayısı: **{len(df_islem_b)}** | Toplam Tutar: **{df_islem_b['tutar'].sum():,.2f} ₺**")
-            
-            dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']])
-            st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Tum_Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
+                st.dataframe(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']].sort_values("tarih", ascending=False), hide_index=True, use_container_width=True)
+                st.info(f"📊 Ekranda filtrelenen toplam işlem sayısı: **{len(df_islem_b)}** | Toplam Tutar: **{df_islem_b['tutar'].sum():,.2f} ₺**")
+                
+                dosya_b, uzanti_b, mime_b = excel_indir(df_islem_b[['tarih', 'hesap_adi', 'islem_tipi', 'karsi_hesap', 'tutar', 'aciklama']])
+                st.download_button("📥 Filtrelenmiş Dökümü Excel'e İndir", data=dosya_b, file_name=f"Tum_Banka_Hareketleri.{uzanti_b}", mime=mime_b, key="dl_banka")
 
     elif alt_menu == "📂 Excel İçe Aktar":
         st.subheader("📂 Banka Ekstresi (Excel) İçe Aktar ve Öğret")
@@ -1490,7 +1500,6 @@ elif menu == "Kasa Yönetimi (Virman)":
     else:
         st.info("Kayıtlı kasa hareketi bulunmuyor.")
 
-# --- PERSONEL MODÜLÜ ---
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
     bildirim_goster()
