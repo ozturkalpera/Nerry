@@ -290,16 +290,23 @@ def platform_sayfasi(platform_adi):
         with st.expander(f"✏️ {platform_adi} Kaydını Düzenle veya Sil", expanded=False):
             satislar_db = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).order("tarih", desc=True))
             if satislar_db:
-                secenekler_ps = {f"{s['tarih']} | {s['odeme_tipi']} | Brüt: {s['brut']} ₺ | Durum: {s['durum']}": s for s in satislar_db}
-                secilen_ps_str = st.selectbox("İşlem Yapılacak Kaydı Seçin", ["Lütfen bir kayıt seçin..."] + list(secenekler_ps.keys()), key=f"{platform_adi}_duzenle_select")
+                # Güvenli Sözlük Oluşturma (Duplicate Option hatasına karşı ID eklendi)
+                secenekler_ps = {f"{s['tarih']} | {s.get('odeme_tipi','')} | Brüt: {s.get('brut',0)} ₺ | Durum: {s.get('durum','')} (ID: {s['id']})": s for s in satislar_db}
+                secilen_ps_str = st.selectbox("İşlem Yapılacak Kaydı Seçin", ["Lütfen bir kayıt seçin..."] + list(secenekler_ps.keys()), key=f"{platform_adi}_duz_select")
                 if secilen_ps_str != "Lütfen bir kayıt seçin...":
                     secilen_ps = secenekler_ps[secilen_ps_str]
                     with st.form(f"{platform_adi}_duzenle_form"):
                         try: ps_tarih = datetime.datetime.strptime(secilen_ps['tarih'], '%Y-%m-%d').date()
                         except: ps_tarih = datetime.date.today()
+                        
                         y_ps_tarih = st.date_input("Tarih", value=ps_tarih)
-                        y_ps_odeme = st.selectbox("Ödeme Tipi", ["Online", "Kapıda Ödeme"], index=["Online", "Kapıda Ödeme"].index(secilen_ps['odeme_tipi']))
-                        y_ps_brut = st.number_input("Brüt Tutar (₺)", min_value=0.0, value=float(secilen_ps['brut']))
+                        
+                        # Güvenli index bulma
+                        odm_val = secilen_ps.get('odeme_tipi', 'Online')
+                        if odm_val not in ["Online", "Kapıda Ödeme"]: odm_val = "Online"
+                        y_ps_odeme = st.selectbox("Ödeme Tipi", ["Online", "Kapıda Ödeme"], index=["Online", "Kapıda Ödeme"].index(odm_val))
+                        
+                        y_ps_brut = st.number_input("Brüt Tutar (₺)", min_value=0.0, value=float(secilen_ps.get('brut', 0)))
                         
                         c_gun, c_sil = st.columns(2)
                         with c_gun:
@@ -307,7 +314,6 @@ def platform_sayfasi(platform_adi):
                                 ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", platform_adi).eq("odeme_tipi", y_ps_odeme))
                                 if len(ayar_getir) > 0:
                                     ayar = ayar_getir[0]
-                                    
                                     k_tutari = round(y_ps_brut * (float(ayar['komisyon']) / 100), 2)
                                     s_tutari = round((y_ps_brut / 1.10) * (float(ayar['stopaj']) / 100), 2)
                                     kes = round(k_tutari + s_tutari, 2)
@@ -329,9 +335,16 @@ def platform_sayfasi(platform_adi):
         bekleyenler = db_oku(supabase.table("platform_satis").select("*").eq("platform", platform_adi).eq("durum", "Bekliyor"))
         if bekleyenler:
             df = pd.DataFrame(bekleyenler)
+            
+            # --- EKSİK SÜTUNLARI GÜVENLİ ŞEKİLDE OLUŞTURMA (KeyError Engeli) ---
+            for col in ['brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'odeme_tipi', 'tahsilat_tarihi']:
+                if col not in df.columns:
+                    if col in ['odeme_tipi', 'tahsilat_tarihi']: df[col] = ""
+                    else: df[col] = 0.0
+
             df['brut'] = pd.to_numeric(df['brut'], errors='coerce').fillna(0).round(2)
-            df['komisyon_tutari'] = pd.to_numeric(df.get('komisyon_tutari', 0), errors='coerce').fillna(0).round(2)
-            df['stopaj_tutari'] = pd.to_numeric(df.get('stopaj_tutari', 0), errors='coerce').fillna(0).round(2)
+            df['komisyon_tutari'] = pd.to_numeric(df['komisyon_tutari'], errors='coerce').fillna(0).round(2)
+            df['stopaj_tutari'] = pd.to_numeric(df['stopaj_tutari'], errors='coerce').fillna(0).round(2)
             df['net'] = pd.to_numeric(df['net'], errors='coerce').fillna(0).round(2)
             df.insert(0, "Seç", False)
             
@@ -379,13 +392,19 @@ def platform_sayfasi(platform_adi):
             st.divider()
             st.subheader("✅ Tahsil Edilenler")
             df_odenen = pd.DataFrame(odenenler).sort_values(by="tarih", ascending=False)
+            
+            for col in ['brut', 'net', 'odeme_tipi', 'tahsilat_tarihi']:
+                if col not in df_odenen.columns:
+                    df_odenen[col] = 0.0 if col in ['brut', 'net'] else ""
+
             df_odenen['net'] = pd.to_numeric(df_odenen['net'], errors='coerce').fillna(0).round(2)
             df_odenen['brut'] = pd.to_numeric(df_odenen['brut'], errors='coerce').fillna(0).round(2)
             st.dataframe(df_odenen[['tarih', 'odeme_tipi', 'brut', 'net', 'tahsilat_tarihi']], hide_index=True, use_container_width=True)
             
             with st.expander("↩️ Tahsilatı Geri Al (Yanlış Aktarımlar İçin)", expanded=False):
                 st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz.")
-                secenekler_o = {f"{o['tarih']} | {o['odeme_tipi']} | Brüt: {o['brut']} ₺ | Net: {o['net']} ₺": o for _, o in df_odenen.iterrows()}
+                # Güvenli sözlük ve Duplicate ID engeli
+                secenekler_o = {f"{o['tarih']} | {o.get('odeme_tipi','')} | Brüt: {o['brut']} ₺ | Net: {o['net']} ₺ (ID:{o['id']})": o for _, o in df_odenen.iterrows()}
                 sec_o_str = st.selectbox("Geri Alınacak Kaydı Seçin", ["Lütfen seçin..."] + list(secenekler_o.keys()), key=f"{platform_adi}_gerial")
                 if sec_o_str != "Lütfen seçin...":
                     sec_o = secenekler_o[sec_o_str]
@@ -572,7 +591,7 @@ elif menu == "Günlük Dükkan Cirosu":
     with st.expander("✏️ Ciro Kaydını Düzenle veya Sil", expanded=False):
         tum_cirolar = db_oku(supabase.table("ciro").select("*").order("tarih", desc=True))
         if tum_cirolar:
-            secenekler_c = {f"{c['tarih']} | {c['kasa']} | Nakit: {c['nakit']} ₺ | KK: {c['kredi_karti']} ₺": c for c in tum_cirolar}
+            secenekler_c = {f"{c['tarih']} | {c['kasa']} | Nakit: {c.get('nakit',0)} ₺ | KK: {c.get('kredi_karti',0)} ₺ (ID: {c['id']})": c for c in tum_cirolar}
             secilen_c_str = st.selectbox("İşlem Yapılacak Ciroyu Seçin", ["Lütfen seçin..."] + list(secenekler_c.keys()))
             if secilen_c_str != "Lütfen seçin...":
                 secilen_c = secenekler_c[secilen_c_str]
@@ -580,12 +599,12 @@ elif menu == "Günlük Dükkan Cirosu":
                     try: c_tarih = datetime.datetime.strptime(secilen_c['tarih'], '%Y-%m-%d').date()
                     except: c_tarih = datetime.date.today()
                     y_c_tarih = st.date_input("Tarih", value=c_tarih)
-                    y_kasa = st.selectbox("Hedef Kasa", ["Kasa 1", "Kasa 2"], index=["Kasa 1", "Kasa 2"].index(secilen_c['kasa']))
-                    y_nakit = st.number_input("Nakit", value=float(secilen_c['nakit']))
-                    y_kredi = st.number_input("KK", value=float(secilen_c['kredi_karti']))
-                    y_pavo_n = st.number_input("Pavo Nakit", value=float(secilen_c['pavo_nakit']))
-                    y_pavo_k = st.number_input("Pavo KK", value=float(secilen_c['pavo_kredi']))
-                    y_odenmez = st.number_input("Ödenmez", value=float(secilen_c['odenmez']))
+                    y_kasa = st.selectbox("Hedef Kasa", ["Kasa 1", "Kasa 2"], index=["Kasa 1", "Kasa 2"].index(secilen_c.get('kasa', 'Kasa 1') if secilen_c.get('kasa') in ["Kasa 1", "Kasa 2"] else "Kasa 1"))
+                    y_nakit = st.number_input("Nakit", value=float(secilen_c.get('nakit', 0)))
+                    y_kredi = st.number_input("KK", value=float(secilen_c.get('kredi_karti', 0)))
+                    y_pavo_n = st.number_input("Pavo Nakit", value=float(secilen_c.get('pavo_nakit', 0)))
+                    y_pavo_k = st.number_input("Pavo KK", value=float(secilen_c.get('pavo_kredi', 0)))
+                    y_odenmez = st.number_input("Ödenmez", value=float(secilen_c.get('odenmez', 0)))
                     c_gun, c_sil = st.columns(2)
                     with c_gun:
                         if st.form_submit_button("Güncelle"):
@@ -603,8 +622,15 @@ elif menu == "Günlük Dükkan Cirosu":
     if cirolar:
         df_ciro = pd.DataFrame(cirolar)
         for col in ['nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']:
+            if col not in df_ciro.columns: df_ciro[col] = 0.0
             df_ciro[col] = pd.to_numeric(df_ciro[col], errors='coerce').fillna(0).round(2)
         st.dataframe(df_ciro[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
+
+elif menu == "Yemek Sepeti Yönetimi":
+    platform_sayfasi("Yemek Sepeti")
+
+elif menu == "Trendyol Yönetimi":
+    platform_sayfasi("Trendyol")
 
 elif menu == "Banka & Kart Yönetimi":
     st.header("💳 Banka ve Kredi Kartı Yönetimi")
@@ -683,18 +709,20 @@ elif menu == "Banka & Kart Yönetimi":
             with st.expander("✏️ Geçmiş İşlemi Düzenle/Sil", expanded=False):
                 islemler_b = db_oku(supabase.table("banka_islemleri").select("*").order("tarih", desc=True))
                 if islemler_b:
-                    secenekler_bi = {f"{i['tarih']} | {i['hesap_adi']} | {i['islem_tipi']} | {i['tutar']} ₺": i for i in islemler_b}
+                    secenekler_bi = {f"{i['tarih']} | {i['hesap_adi']} | {i['islem_tipi']} | {i['tutar']} ₺ (ID: {i['id']})": i for i in islemler_b}
                     sec_bi_str = st.selectbox("İşlem Seçin", ["Seçiniz..."] + list(secenekler_bi.keys()))
                     if sec_bi_str != "Seçiniz...":
                         sec_bi = secenekler_bi[sec_bi_str]
                         with st.form("islem_b_duz"):
-                            y_b_tarih = st.date_input("Tarih", value=datetime.datetime.strptime(sec_bi['tarih'], '%Y-%m-%d').date())
+                            try: y_b_tarih = datetime.datetime.strptime(sec_bi['tarih'], '%Y-%m-%d').date()
+                            except: y_b_tarih = datetime.date.today()
+                            y_b_tarih_val = st.date_input("Tarih", value=y_b_tarih)
                             y_b_tutar = st.number_input("Tutar", value=float(sec_bi['tutar']))
                             y_b_ack = st.text_input("Açıklama", value=sec_bi.get('aciklama', ''))
                             cg, cs = st.columns(2)
                             with cg:
                                 if st.form_submit_button("Güncelle"):
-                                    if db_yaz(supabase.table("banka_islemleri").update({"tarih": str(y_b_tarih), "tutar": y_b_tutar, "aciklama": y_b_ack}).eq("id", sec_bi['id'])):
+                                    if db_yaz(supabase.table("banka_islemleri").update({"tarih": str(y_b_tarih_val), "tutar": y_b_tutar, "aciklama": y_b_ack}).eq("id", sec_bi['id'])):
                                         st.session_state.genel_mesaj = ("success", "Banka işlemi güncellendi!")
                                     st.rerun()
                             with cs:
@@ -971,7 +999,7 @@ elif menu == "Masraf Girişi":
     with st.expander("✏️ Masraf Düzenle veya Sil", expanded=False):
         tum_masraflar = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
         if tum_masraflar:
-            secenekler = {f"{m['tarih']} | {m.get('masraf_tipi','Genel')} | {m['aciklama']} | {m['tutar']} ₺": m for m in tum_masraflar}
+            secenekler = {f"{m['tarih']} | {m.get('masraf_tipi','Genel')} | {m.get('aciklama','')} | {m['tutar']} ₺ (ID: {m['id']})": m for m in tum_masraflar}
             secilen_m_str = st.selectbox("İşlem Yapılacak Masrafı Seçin", ["Lütfen seçin..."] + list(secenekler.keys()))
             if secilen_m_str != "Lütfen seçin...":
                 secilen_m = secenekler[secilen_m_str]
@@ -982,20 +1010,21 @@ elif menu == "Masraf Girişi":
                     try: t_idx = tipler.index(secilen_m.get('masraf_tipi', 'Genel Masraf'))
                     except: t_idx = 0
                     y_tip = st.selectbox("Masraf Tipi", tipler, index=t_idx)
-                    y_aciklama = st.text_input("Açıklama", value=secilen_m['aciklama'])
-                    y_tutar = st.number_input("Tutar (₺)", value=float(secilen_m['tutar']))
-                    try: o_idx = odeme_yontemleri.index(secilen_m['odeme_tipi'])
-                    except: o_idx = 0
-                    y_odeme_y = st.selectbox("Nereden Ödendi?", odeme_yontemleri, index=o_idx)
+                    y_aciklama = st.text_input("Açıklama", value=secilen_m.get('aciklama',''))
+                    y_tutar = st.number_input("Tutar (₺)", value=float(secilen_m.get('tutar', 0)))
+                    
+                    o_val = secilen_m.get('odeme_tipi', 'Nakit - Kasa 1')
+                    if o_val not in odeme_yontemleri: o_val = odeme_yontemleri[0]
+                    y_odeme_y = st.selectbox("Nereden Ödendi?", odeme_yontemleri, index=odeme_yontemleri.index(o_val))
                     
                     c_gun, c_sil = st.columns(2)
                     with c_gun:
                         if st.form_submit_button("Güncelle"):
-                            if str(secilen_m['odeme_tipi']).startswith("Cari - "):
-                                eski_c_adi = secilen_m['odeme_tipi'].replace("Cari - ", "")
-                                db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", eski_c_adi).eq("tarih", str(secilen_m['tarih'])).ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
-                            elif secilen_m['odeme_tipi'] in banka_liste:
-                                db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", str(secilen_m['tarih'])).eq("islem_tipi", "Para Çıkışı (Masraf)").ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
+                            if str(secilen_m.get('odeme_tipi','')).startswith("Cari - "):
+                                eski_c_adi = str(secilen_m.get('odeme_tipi')).replace("Cari - ", "")
+                                db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", eski_c_adi).eq("tarih", str(secilen_m['tarih'])).ilike("aciklama", f"Masraf: {secilen_m.get('aciklama','')}%"))
+                            elif str(secilen_m.get('odeme_tipi','')) in banka_liste:
+                                db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", str(secilen_m['tarih'])).eq("islem_tipi", "Para Çıkışı (Masraf)").ilike("aciklama", f"Masraf: {secilen_m.get('aciklama','')}%"))
                             
                             db_yaz(supabase.table("masraf").update({"tarih": str(y_tarih), "masraf_tipi": y_tip, "aciklama": y_aciklama, "tutar": y_tutar, "odeme_tipi": y_odeme_y}).eq("id", secilen_m['id']))
                             
@@ -1010,11 +1039,11 @@ elif menu == "Masraf Girişi":
                     with c_sil:
                         if st.form_submit_button("Sil"):
                             if db_yaz(supabase.table("masraf").delete().eq("id", secilen_m['id'])):
-                                if str(secilen_m['odeme_tipi']).startswith("Cari - "):
-                                    sil_c_adi = secilen_m['odeme_tipi'].replace("Cari - ", "")
-                                    db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", sil_c_adi).eq("tarih", str(secilen_m['tarih'])).ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
-                                elif secilen_m['odeme_tipi'] in banka_liste:
-                                    db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", str(secilen_m['tarih'])).eq("islem_tipi", "Para Çıkışı (Masraf)").ilike("aciklama", f"Masraf: {secilen_m['aciklama']}%"))
+                                if str(secilen_m.get('odeme_tipi','')).startswith("Cari - "):
+                                    sil_c_adi = str(secilen_m.get('odeme_tipi')).replace("Cari - ", "")
+                                    db_yaz(supabase.table("cari_islemler").delete().eq("cari_adi", sil_c_adi).eq("tarih", str(secilen_m['tarih'])).ilike("aciklama", f"Masraf: {secilen_m.get('aciklama','')}%"))
+                                elif str(secilen_m.get('odeme_tipi','')) in banka_liste:
+                                    db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", secilen_m['odeme_tipi']).eq("tarih", str(secilen_m['tarih'])).eq("islem_tipi", "Para Çıkışı (Masraf)").ilike("aciklama", f"Masraf: {secilen_m.get('aciklama','')}%"))
                                 st.session_state.genel_mesaj = ("info", "Masraf tamamen silindi!")
                                 st.rerun()
 
@@ -1022,6 +1051,10 @@ elif menu == "Masraf Girişi":
     masraflar = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
     if masraflar:
         df_masraf = pd.DataFrame(masraflar)
+        if 'tutar' not in df_masraf.columns: df_masraf['tutar'] = 0.0
+        if 'odeme_tipi' not in df_masraf.columns: df_masraf['odeme_tipi'] = ""
+        if 'aciklama' not in df_masraf.columns: df_masraf['aciklama'] = ""
+        
         df_masraf['tutar'] = pd.to_numeric(df_masraf['tutar'], errors='coerce').fillna(0).round(2)
         df_masraf['masraf_tipi'] = df_masraf.get('masraf_tipi', 'Genel').fillna('Genel Masraf')
         df_masraf['tarih'] = pd.to_datetime(df_masraf['tarih']).dt.date
@@ -1103,34 +1136,41 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
             with st.expander("✏️ Geçmiş İşlemi Düzenle/Sil", expanded=False):
                 islemler = db_oku(supabase.table("cari_islemler").select("*").order("tarih", desc=True))
                 if islemler:
-                    secenekler_i = {f"{i['tarih']} | {i['cari_adi']} | {i['islem_tipi']} | {i['tutar']} ₺": i for i in islemler}
+                    secenekler_i = {f"{i['tarih']} | {i['cari_adi']} | {i['islem_tipi']} | {i['tutar']} ₺ (ID: {i['id']})": i for i in islemler}
                     sec_i_str = st.selectbox("İşlem Seçin", ["Seçiniz..."] + list(secenekler_i.keys()))
                     if sec_i_str != "Seçiniz...":
                         sec_i = secenekler_i[sec_i_str]
                         with st.form("islem_duz"):
-                            y_tarih = st.date_input("Tarih", value=datetime.datetime.strptime(sec_i['tarih'], '%Y-%m-%d').date())
-                            y_tip = st.selectbox("İşlem Tipi", ["Gelen Fatura (Bize Borç Yazar)", "Ödeme Yaptık (Borç Düşer)"], index=0 if "Fatura" in sec_i['islem_tipi'] else 1)
-                            y_tutar = st.number_input("Tutar", value=float(sec_i['tutar']))
+                            try: y_tarih = datetime.datetime.strptime(sec_i['tarih'], '%Y-%m-%d').date()
+                            except: y_tarih = datetime.date.today()
+                            y_tarih_val = st.date_input("Tarih", value=y_tarih)
                             
-                            idx_o = odeme_yontemleri.index(sec_i.get('odeme_tipi', '- Yok -')) if sec_i.get('odeme_tipi') in odeme_yontemleri else 0
-                            y_odeme = st.selectbox("Nereden Ödendi?", odeme_yontemleri, index=idx_o)
+                            islem_tipi_val = sec_i.get('islem_tipi', 'Gelen Fatura (Bize Borç Yazar)')
+                            if islem_tipi_val not in ["Gelen Fatura (Bize Borç Yazar)", "Ödeme Yaptık (Borç Düşer)"]: islem_tipi_val = "Gelen Fatura (Bize Borç Yazar)"
+                            y_tip = st.selectbox("İşlem Tipi", ["Gelen Fatura (Bize Borç Yazar)", "Ödeme Yaptık (Borç Düşer)"], index=["Gelen Fatura (Bize Borç Yazar)", "Ödeme Yaptık (Borç Düşer)"].index(islem_tipi_val))
+                            
+                            y_tutar = st.number_input("Tutar", value=float(sec_i.get('tutar', 0)))
+                            
+                            odm_val = sec_i.get('odeme_tipi', '- Yok -')
+                            if odm_val not in odeme_yontemleri: odm_val = "- Yok -"
+                            y_odeme = st.selectbox("Nereden Ödendi?", odeme_yontemleri, index=odeme_yontemleri.index(odm_val))
                             
                             y_ack = st.text_input("Açıklama", value=sec_i.get('aciklama', ''))
                             cg, cs = st.columns(2)
                             with cg:
                                 if st.form_submit_button("Güncelle"):
-                                    if sec_i['islem_tipi'] == "Ödeme Yaptık (Borç Düşer)" and sec_i.get('odeme_tipi') in b_liste:
+                                    if str(sec_i.get('islem_tipi')) == "Ödeme Yaptık (Borç Düşer)" and str(sec_i.get('odeme_tipi')) in b_liste:
                                         db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", str(sec_i['tarih'])).eq("islem_tipi", "Para Çıkışı").ilike("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}%"))
                                     
-                                    db_yaz(supabase.table("cari_islemler").update({"tarih": str(y_tarih), "islem_tipi": y_tip, "tutar": y_tutar, "aciklama": y_ack, "odeme_tipi": y_odeme if y_tip == "Ödeme Yaptık (Borç Düşer)" else "- Yok -"}).eq("id", sec_i['id']))
+                                    db_yaz(supabase.table("cari_islemler").update({"tarih": str(y_tarih_val), "islem_tipi": y_tip, "tutar": y_tutar, "aciklama": y_ack, "odeme_tipi": y_odeme if y_tip == "Ödeme Yaptık (Borç Düşer)" else "- Yok -"}).eq("id", sec_i['id']))
                                     
                                     if y_tip == "Ödeme Yaptık (Borç Düşer)" and y_odeme in b_liste:
-                                        db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(y_tarih), "hesap_adi": y_odeme, "islem_tipi": "Para Çıkışı", "karsi_hesap": sec_i['cari_adi'], "tutar": y_tutar, "aciklama": f"Cari Ödemesi: {y_ack}"}))
+                                        db_yaz(supabase.table("banka_islemleri").insert({"tarih": str(y_tarih_val), "hesap_adi": y_odeme, "islem_tipi": "Para Çıkışı", "karsi_hesap": sec_i['cari_adi'], "tutar": y_tutar, "aciklama": f"Cari Ödemesi: {y_ack}"}))
                                     st.session_state.genel_mesaj = ("success", "İşlem güncellendi!")
                                     st.rerun()
                             with cs:
                                 if st.form_submit_button("Sil"):
-                                    if sec_i['islem_tipi'] == "Ödeme Yaptık (Borç Düşer)" and sec_i.get('odeme_tipi') in b_liste:
+                                    if str(sec_i.get('islem_tipi')) == "Ödeme Yaptık (Borç Düşer)" and str(sec_i.get('odeme_tipi')) in b_liste:
                                         db_yaz(supabase.table("banka_islemleri").delete().eq("hesap_adi", sec_i['odeme_tipi']).eq("tarih", str(sec_i['tarih'])).eq("islem_tipi", "Para Çıkışı").ilike("aciklama", f"Cari Ödemesi: {sec_i.get('aciklama', '')}%"))
                                     
                                     if db_yaz(supabase.table("cari_islemler").delete().eq("id", sec_i['id'])):
@@ -1141,6 +1181,10 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
         islemler = db_oku(supabase.table("cari_islemler").select("*"))
         if islemler:
             df_i = pd.DataFrame(islemler)
+            if 'tutar' not in df_i.columns: df_i['tutar'] = 0.0
+            if 'odeme_tipi' not in df_i.columns: df_i['odeme_tipi'] = ""
+            if 'aciklama' not in df_i.columns: df_i['aciklama'] = ""
+            
             df_i['tutar'] = pd.to_numeric(df_i['tutar'], errors='coerce').fillna(0).round(2)
             
             fatura_toplam = df_i[df_i['islem_tipi'] == 'Gelen Fatura (Bize Borç Yazar)'].groupby('cari_adi')['tutar'].sum()
@@ -1259,13 +1303,13 @@ elif menu == "Kasa Yönetimi (Virman)":
         if gecmis_islemler:
             secenekler_k = {}
             for i in gecmis_islemler:
-                if i['islem_tipi'] in ['Açılış', 'Para Girişi (Sermaye)']: lbl = f"{i['tarih']} | SERMAYE/AÇILIŞ | {i.get('alan')} | {i['tutar']} ₺"
-                elif i['islem_tipi'] == 'Virman': lbl = f"{i['tarih']} | VİRMAN | {i['gonderen']} -> {i['alan']} | {i['tutar']} ₺"
-                elif i['islem_tipi'] == 'Eksik': lbl = f"{i['tarih']} | EKSİK ÇIKTI | {i['gonderen']} | {i['tutar']} ₺"
-                elif i['islem_tipi'] == 'Fazla': lbl = f"{i['tarih']} | FAZLA ÇIKTI | {i['alan']} | {i['tutar']} ₺"
-                elif i['islem_tipi'] == 'Bankaya Yatırılan': lbl = f"{i['tarih']} | BANKAYA YATIRILAN | {i['gonderen']} | {i['tutar']} ₺"
-                elif i['islem_tipi'] == 'Bankadan Çekilen': lbl = f"{i['tarih']} | BANKADAN ÇEKİLEN | {i['alan']} | {i['tutar']} ₺"
-                secenekler_k[lbl] = i
+                if i['islem_tipi'] in ['Açılış', 'Para Girişi (Sermaye)']: lbl = f"{i['tarih']} | SERMAYE/AÇILIŞ | {i.get('alan')} | {i.get('tutar',0)} ₺"
+                elif i['islem_tipi'] == 'Virman': lbl = f"{i['tarih']} | VİRMAN | {i.get('gonderen')} -> {i.get('alan')} | {i.get('tutar',0)} ₺"
+                elif i['islem_tipi'] == 'Eksik': lbl = f"{i['tarih']} | EKSİK ÇIKTI | {i.get('gonderen')} | {i.get('tutar',0)} ₺"
+                elif i['islem_tipi'] == 'Fazla': lbl = f"{i['tarih']} | FAZLA ÇIKTI | {i.get('alan')} | {i.get('tutar',0)} ₺"
+                elif i['islem_tipi'] == 'Bankaya Yatırılan': lbl = f"{i['tarih']} | BANKAYA YATIRILAN | {i.get('gonderen')} | {i.get('tutar',0)} ₺"
+                elif i['islem_tipi'] == 'Bankadan Çekilen': lbl = f"{i['tarih']} | BANKADAN ÇEKİLEN | {i.get('alan')} | {i.get('tutar',0)} ₺"
+                secenekler_k[f"{lbl} (ID: {i['id']})"] = i
                 
             sec_k_str = st.selectbox("İşlem Seçin", ["Lütfen seçin..."] + list(secenekler_k.keys()))
             if sec_k_str != "Lütfen seçin...":
@@ -1276,18 +1320,22 @@ elif menu == "Kasa Yönetimi (Virman)":
                     y_tar = st.date_input("Tarih", value=k_tar)
                     
                     islem_turleri = ["Virman", "Eksik", "Fazla", "Para Girişi (Sermaye)", "Bankaya Yatırılan", "Bankadan Çekilen"]
-                    y_islem = st.selectbox("İşlem Tipi", islem_turleri, index=islem_turleri.index(sec_k['islem_tipi']) if sec_k['islem_tipi'] in islem_turleri else 3)
+                    i_tip_val = sec_k.get('islem_tipi', 'Virman')
+                    if i_tip_val not in islem_turleri: i_tip_val = "Virman"
+                    y_islem = st.selectbox("İşlem Tipi", islem_turleri, index=islem_turleri.index(i_tip_val))
                     
                     k_list = ["Kasa 1", "Kasa 2", "POS Havuzu", "Pavo Havuzu"]
                     c_k1, c_k2 = st.columns(2)
                     with c_k1:
-                        idx_g = k_list.index(sec_k.get('gonderen')) if sec_k.get('gonderen') in k_list else 0
-                        y_gon = st.selectbox("Gönderen (Veya Eksik) Kasa/Havuz", k_list, index=idx_g)
+                        g_val = sec_k.get('gonderen', 'Kasa 1')
+                        if g_val not in k_list: g_val = k_list[0]
+                        y_gon = st.selectbox("Gönderen (Veya Eksik) Kasa/Havuz", k_list, index=k_list.index(g_val))
                     with c_k2:
-                        idx_a = k_list.index(sec_k.get('alan')) if sec_k.get('alan') in k_list else 0
-                        y_aln = st.selectbox("Alan (Veya Fazla) Kasa/Havuz", k_list, index=idx_a)
+                        a_val = sec_k.get('alan', 'Kasa 2')
+                        if a_val not in k_list: a_val = k_list[1]
+                        y_aln = st.selectbox("Alan (Veya Fazla) Kasa/Havuz", k_list, index=k_list.index(a_val))
                         
-                    y_tutar = st.number_input("Tutar (₺)", min_value=0.0, value=float(sec_k['tutar']))
+                    y_tutar = st.number_input("Tutar (₺)", min_value=0.0, value=float(sec_k.get('tutar', 0)))
                     
                     c_gun, c_sil = st.columns(2)
                     with c_gun:
@@ -1301,67 +1349,67 @@ elif menu == "Kasa Yönetimi (Virman)":
                     with c_sil:
                         if st.form_submit_button("Sil"):
                             if sec_k['islem_tipi'] == "Bankaya Yatırılan":
-                                db_yaz(supabase.table("banka_islemleri").delete().eq("tarih", sec_k['tarih']).eq("tutar", sec_k['tutar']).eq("aciklama", f"{sec_k['gonderen']}'dan Yatırılan"))
+                                db_yaz(supabase.table("banka_islemleri").delete().eq("tarih", sec_k['tarih']).eq("tutar", sec_k['tutar']).eq("aciklama", f"{sec_k.get('gonderen')}['dan Yatırılan]"))
                             elif sec_k['islem_tipi'] == "Bankadan Çekilen":
-                                db_yaz(supabase.table("banka_islemleri").delete().eq("tarih", sec_k['tarih']).eq("tutar", sec_k['tutar']).eq("aciklama", f"{sec_k['alan']}'ya Çekilen"))
+                                db_yaz(supabase.table("banka_islemleri").delete().eq("tarih", sec_k['tarih']).eq("tutar", sec_k['tutar']).eq("aciklama", f"{sec_k.get('alan')}['ya Çekilen]"))
                                 
                             if db_yaz(supabase.table("kasa_islemleri").delete().eq("id", sec_k['id'])):
                                 st.session_state.genel_mesaj = ("info", "Kasa işlemi silindi!")
                             st.rerun()
 
-    cirolar_tum = db_oku(supabase.table("ciro").select("*").lte("tarih", str(secilen)))
-    masraflar_tum = db_oku(supabase.table("masraf").select("*").lte("tarih", str(secilen)))
-    islemler_tum = db_oku(supabase.table("kasa_islemleri").select("*").lte("tarih", str(secilen)))
-    cari_islemler_tum = db_oku(supabase.table("cari_islemler").select("*").lte("tarih", str(secilen)))
+    cirolar_all = db_oku(supabase.table("ciro").select("*"))
+    masraflar_all = db_oku(supabase.table("masraf").select("*"))
+    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
+    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
 
     def kasa_durumu(k_adi):
-        g_c = [c for c in cirolar_tum if c['tarih'] < str(secilen) and c.get('kasa') == k_adi]
-        g_m = [m for m in masraflar_tum if m['tarih'] < str(secilen) and m.get('odeme_tipi') == f"Nakit - {k_adi}"]
-        g_co = [co for co in cari_islemler_tum if co['tarih'] < str(secilen) and co.get('islem_tipi') == 'Ödeme Yaptık (Borç Düşer)' and co.get('odeme_tipi') == f"Nakit - {k_adi}"]
-        g_i = [i for i in islemler_tum if i['tarih'] < str(secilen)]
+        g_c = [c for c in cirolar_all if c['tarih'] < str(secilen) and c.get('kasa') == k_adi]
+        g_m = [m for m in masraflar_all if m['tarih'] < str(secilen) and m.get('odeme_tipi') == f"Nakit - {k_adi}"]
+        g_co = [co for co in cari_islemler_all if co['tarih'] < str(secilen) and co.get('islem_tipi') == 'Ödeme Yaptık (Borç Düşer)' and co.get('odeme_tipi') == f"Nakit - {k_adi}"]
+        g_i = [i for i in islemler_all if i['tarih'] < str(secilen)]
 
         devir = sum([(float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))) for c in g_c])
-        devir -= sum([float(m['tutar']) for m in g_m])
-        devir -= sum([float(co['tutar']) for co in g_co]) 
-        devir += sum([float(i['tutar']) for i in g_i if i.get('islem_tipi') in ['Açılış', 'Para Girişi (Sermaye)', 'Bankadan Çekilen'] and i.get('alan') == k_adi])
-        devir += sum([float(i['tutar']) for i in g_i if i.get('islem_tipi') == 'Virman' and i.get('alan') == k_adi])
-        devir -= sum([float(i['tutar']) for i in g_i if i.get('islem_tipi') == 'Virman' and i.get('gonderen') == k_adi])
-        devir -= sum([float(i['tutar']) for i in g_i if i.get('islem_tipi') in ['Eksik', 'Bankaya Yatırılan'] and i.get('gonderen') == k_adi])
-        devir += sum([float(i['tutar']) for i in g_i if i.get('islem_tipi') == 'Fazla' and i.get('alan') == k_adi])
+        devir -= sum([float(m.get('tutar', 0)) for m in g_m])
+        devir -= sum([float(co.get('tutar', 0)) for co in g_co]) 
+        devir += sum([float(i.get('tutar', 0)) for i in g_i if i.get('islem_tipi') in ['Açılış', 'Para Girişi (Sermaye)', 'Bankadan Çekilen'] and i.get('alan') == k_adi])
+        devir += sum([float(i.get('tutar', 0)) for i in g_i if i.get('islem_tipi') == 'Virman' and i.get('alan') == k_adi])
+        devir -= sum([float(i.get('tutar', 0)) for i in g_i if i.get('islem_tipi') == 'Virman' and i.get('gonderen') == k_adi])
+        devir -= sum([float(i.get('tutar', 0)) for i in g_i if i.get('islem_tipi') in ['Eksik', 'Bankaya Yatırılan'] and i.get('gonderen') == k_adi])
+        devir += sum([float(i.get('tutar', 0)) for i in g_i if i.get('islem_tipi') == 'Fazla' and i.get('alan') == k_adi])
 
-        b_c = [c for c in cirolar_tum if c['tarih'] == str(secilen) and c.get('kasa') == k_adi]
-        b_m = [m for m in masraflar_tum if m['tarih'] == str(secilen) and m.get('odeme_tipi') == f"Nakit - {k_adi}"]
-        b_co = [co for co in cari_islemler_tum if co['tarih'] == str(secilen) and co.get('islem_tipi') == 'Ödeme Yaptık (Borç Düşer)' and co.get('odeme_tipi') == f"Nakit - {k_adi}"]
-        b_i = [i for i in islemler_tum if i['tarih'] == str(secilen)]
+        b_c = [c for c in cirolar_all if c['tarih'] == str(secilen) and c.get('kasa') == k_adi]
+        b_m = [m for m in masraflar_all if m['tarih'] == str(secilen) and m.get('odeme_tipi') == f"Nakit - {k_adi}"]
+        b_co = [co for co in cari_islemler_all if co['tarih'] == str(secilen) and co.get('islem_tipi') == 'Ödeme Yaptık (Borç Düşer)' and co.get('odeme_tipi') == f"Nakit - {k_adi}"]
+        b_i = [i for i in islemler_all if i['tarih'] == str(secilen)]
 
         b_giris = sum([(float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))) for c in b_c])
-        b_cikis = sum([float(m['tutar']) for m in b_m])
-        b_cari_odeme = sum([float(co['tutar']) for co in b_co])
-        b_ekle = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') in ['Açılış', 'Para Girişi (Sermaye)'] and i.get('alan') == k_adi])
-        b_vg = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') == 'Virman' and i.get('alan') == k_adi])
-        b_vc = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') == 'Virman' and i.get('gonderen') == k_adi])
-        b_eksik = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') == 'Eksik' and i.get('gonderen') == k_adi])
-        b_fazla = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') == 'Fazla' and i.get('alan') == k_adi])
+        b_cikis = sum([float(m.get('tutar', 0)) for m in b_m])
+        b_cari_odeme = sum([float(co.get('tutar', 0)) for co in b_co])
+        b_ekle = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') in ['Açılış', 'Para Girişi (Sermaye)'] and i.get('alan') == k_adi])
+        b_vg = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') == 'Virman' and i.get('alan') == k_adi])
+        b_vc = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') == 'Virman' and i.get('gonderen') == k_adi])
+        b_eksik = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') == 'Eksik' and i.get('gonderen') == k_adi])
+        b_fazla = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') == 'Fazla' and i.get('alan') == k_adi])
         
-        b_bankaya_yatan = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') == 'Bankaya Yatırılan' and i.get('gonderen') == k_adi])
-        b_bankadan_cekilen = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') == 'Bankadan Çekilen' and i.get('alan') == k_adi])
+        b_bankaya_yatan = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') == 'Bankaya Yatırılan' and i.get('gonderen') == k_adi])
+        b_bankadan_cekilen = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') == 'Bankadan Çekilen' and i.get('alan') == k_adi])
 
         gun_sonu = devir + b_giris + b_ekle + b_bankadan_cekilen + b_vg + b_fazla - b_cikis - b_cari_odeme - b_bankaya_yatan - b_vc - b_eksik
         return round(devir,2), round(b_giris,2), round(b_ekle,2), round(b_cikis,2), round(b_cari_odeme,2), round(b_vg,2), round(b_vc,2), round(b_eksik,2), round(b_fazla,2), round(b_bankaya_yatan,2), round(b_bankadan_cekilen,2), round(gun_sonu,2)
 
     def havuz_durumu(h_adi):
-        g_c = [c for c in cirolar_tum if c['tarih'] < str(secilen)]
-        g_i = [i for i in islemler_tum if i['tarih'] < str(secilen)]
+        g_c = [c for c in cirolar_all if c['tarih'] < str(secilen)]
+        g_i = [i for i in islemler_all if i['tarih'] < str(secilen)]
         if h_adi == "POS Havuzu": devir_ciro = sum([float(c.get('kredi_karti', 0)) for c in g_c])
         else: devir_ciro = sum([float(c.get('pavo_kredi', 0)) for c in g_c])
-        devir_cikis = sum([float(i['tutar']) for i in g_i if i.get('islem_tipi') == 'Bankaya Yatırılan' and i.get('gonderen') == h_adi])
+        devir_cikis = sum([float(i.get('tutar', 0)) for i in g_i if i.get('islem_tipi') == 'Bankaya Yatırılan' and i.get('gonderen') == h_adi])
         devir = devir_ciro - devir_cikis
 
-        b_c = [c for c in cirolar_tum if c['tarih'] == str(secilen)]
-        b_i = [i for i in islemler_tum if i['tarih'] == str(secilen)]
+        b_c = [c for c in cirolar_all if c['tarih'] == str(secilen)]
+        b_i = [i for i in islemler_all if i['tarih'] == str(secilen)]
         if h_adi == "POS Havuzu": bugun_ciro = sum([float(c.get('kredi_karti', 0)) for c in b_c])
         else: bugun_ciro = sum([float(c.get('pavo_kredi', 0)) for c in b_c])
-        bugun_cikis = sum([float(i['tutar']) for i in b_i if i.get('islem_tipi') == 'Bankaya Yatırılan' and i.get('gonderen') == h_adi])
+        bugun_cikis = sum([float(i.get('tutar', 0)) for i in b_i if i.get('islem_tipi') == 'Bankaya Yatırılan' and i.get('gonderen') == h_adi])
         
         net = devir + bugun_ciro - bugun_cikis
         return round(devir,2), round(bugun_ciro,2), round(bugun_cikis,2), round(net,2)
@@ -1423,11 +1471,6 @@ elif menu == "Kasa Yönetimi (Virman)":
     st.divider()
     st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
     
-    cirolar_all = db_oku(supabase.table("ciro").select("*"))
-    masraflar_all = db_oku(supabase.table("masraf").select("*"))
-    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
-    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
-    
     kasa_dokum = []
     
     if cirolar_all:
@@ -1441,14 +1484,14 @@ elif menu == "Kasa Yönetimi (Virman)":
             o_tipi = str(m.get('odeme_tipi', ''))
             if o_tipi.startswith("Nakit - "):
                 k_adi = o_tipi.replace("Nakit - ", "")
-                kasa_dokum.append({"Tarih": m['tarih'], "Kasa": k_adi, "İşlem": "Masraf Çıkışı", "Yön": "Çıkış", "Tutar": float(m['tutar']), "Açıklama": m.get('aciklama', '')})
+                kasa_dokum.append({"Tarih": m['tarih'], "Kasa": k_adi, "İşlem": "Masraf Çıkışı", "Yön": "Çıkış", "Tutar": float(m.get('tutar',0)), "Açıklama": m.get('aciklama', '')})
                 
     if cari_islemler_all:
         for co in cari_islemler_all:
             o_tipi = str(co.get('odeme_tipi', ''))
             if o_tipi.startswith("Nakit - "):
                 k_adi = o_tipi.replace("Nakit - ", "")
-                kasa_dokum.append({"Tarih": co['tarih'], "Kasa": k_adi, "İşlem": "Cari Ödemesi", "Yön": "Çıkış", "Tutar": float(co['tutar']), "Açıklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}"})
+                kasa_dokum.append({"Tarih": co['tarih'], "Kasa": k_adi, "İşlem": "Cari Ödemesi", "Yön": "Çıkış", "Tutar": float(co.get('tutar',0)), "Açıklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}"})
                 
     if islemler_all:
         for i in islemler_all:
@@ -1490,7 +1533,6 @@ elif menu == "Kasa Yönetimi (Virman)":
     else:
         st.info("Kayıtlı kasa hareketi bulunmuyor.")
 
-# --- PERSONEL MODÜLÜ ---
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
     bildirim_goster()
@@ -1592,7 +1634,7 @@ elif menu == "Personel & Puantaj":
             with st.expander("✏️ Puantaj Düzenle/Sil", expanded=False):
                 tum_puantaj = db_oku(supabase.table("puantaj").select("*").order("tarih", desc=True))
                 if tum_puantaj:
-                    secenekler_p = {f"{p['tarih']} | {p['personel_adi']} | {p['durum']}": p for p in tum_puantaj}
+                    secenekler_p = {f"{p['tarih']} | {p.get('personel_adi','')} | {p.get('durum','')} (ID: {p['id']})": p for p in tum_puantaj}
                     secilen_p_str = st.selectbox("Kayıt Seç", ["Seçiniz..."] + list(secenekler_p.keys()))
                     if secilen_p_str != "Seçiniz...":
                         secilen_p = secenekler_p[secilen_p_str]
@@ -1600,19 +1642,24 @@ elif menu == "Personel & Puantaj":
                             try: y_tar = datetime.datetime.strptime(secilen_p['tarih'], '%Y-%m-%d').date()
                             except: y_tar = datetime.date.today()
                             y_tarih = st.date_input("Tarih", value=y_tar)
-                            y_isim = st.selectbox("Personel", [pr['isim'] for pr in personel_listesi], index=[pr['isim'] for pr in personel_listesi].index(secilen_p['personel_adi']))
+                            
+                            p_isim_val = secilen_p.get('personel_adi')
+                            p_isim_list = [pr['isim'] for pr in personel_listesi]
+                            if p_isim_val not in p_isim_list: p_isim_val = p_isim_list[0]
+                            y_isim = st.selectbox("Personel", p_isim_list, index=p_isim_list.index(p_isim_val))
                             
                             durumlar = ["Tam Gün", "Yarım Gün", "Haftalık İzin", "Yıllık İzin", "Ücretsiz İzin", "Raporlu", "Gelmedi"]
-                            idx_dur = durumlar.index(secilen_p['durum']) if secilen_p['durum'] in durumlar else 0
-                            y_durum = st.selectbox("Durum", durumlar, index=idx_dur)
+                            d_val = secilen_p.get('durum', 'Tam Gün')
+                            if d_val not in durumlar: d_val = "Tam Gün"
+                            y_durum = st.selectbox("Durum", durumlar, index=durumlar.index(d_val))
                             
-                            y_mesai = st.number_input("Mesai", value=float(secilen_p['fazla_mesai_saati']))
+                            y_mesai = st.number_input("Mesai", value=float(secilen_p.get('fazla_mesai_saati', 0)))
                             
                             cg, cs = st.columns(2)
                             with cg:
                                 if st.form_submit_button("Güncelle"):
                                     hata_var = False
-                                    if y_durum == "Yıllık İzin" and secilen_p['durum'] != "Yıllık İzin":
+                                    if y_durum == "Yıllık İzin" and secilen_p.get('durum') != "Yıllık İzin":
                                         p_bilgi = next((p for p in personel_listesi if p['isim'] == y_isim), None)
                                         i_hakki = float(p_bilgi.get('yillik_izin_hakki', 0)) if p_bilgi else 0
                                         kull_izinler = db_oku(supabase.table("puantaj").select("id").eq("personel_adi", y_isim).eq("durum", "Yıllık İzin"))
@@ -1620,7 +1667,7 @@ elif menu == "Personel & Puantaj":
                                             st.error("Bu personelin yıllık izin hakkı kalmamıştır!")
                                             hata_var = True
                                             
-                                    if y_durum == "Haftalık İzin" and secilen_p['durum'] != "Haftalık İzin" and not hata_var:
+                                    if y_durum == "Haftalık İzin" and secilen_p.get('durum') != "Haftalık İzin" and not hata_var:
                                         h_baslangic = y_tarih - datetime.timedelta(days=y_tarih.weekday())
                                         h_bitis = h_baslangic + datetime.timedelta(days=6)
                                         sorgu_h = supabase.table("puantaj").select("id").eq("personel_adi", y_isim).eq("durum", "Haftalık İzin").gte("tarih", str(h_baslangic)).lte("tarih", str(h_bitis))
@@ -1710,7 +1757,7 @@ elif menu == "Personel & Puantaj":
                             odenecek_gun = 30
                             
                         hakedis_maas = odenecek_gun * gunluk_ucret
-                        toplam_mesai = pers_puantaj['fazla_mesai_saati'].sum()
+                        toplam_mesai = pd.to_numeric(pers_puantaj['fazla_mesai_saati'], errors='coerce').fillna(0).sum()
                         mesai_tutari = toplam_mesai * mesai_saatlik_ucret
                         net_odenecek = hakedis_maas + mesai_tutari
                         
@@ -1736,8 +1783,9 @@ elif menu == "Raporlar":
     sat = db_oku(supabase.table("platform_satis").select("*"))
     if sat: 
         df_sat = pd.DataFrame(sat)
-        if 'komisyon_tutari' not in df_sat.columns: df_sat['komisyon_tutari'] = 0.0
-        if 'stopaj_tutari' not in df_sat.columns: df_sat['stopaj_tutari'] = 0.0
+        for col in ['platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']:
+            if col not in df_sat.columns: df_sat[col] = 0.0 if 'tutari' in col or col in ['brut', 'net'] else ''
+            
         df_sat = df_sat.sort_values(by="tarih", ascending=False)
         st.dataframe(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']], hide_index=True, use_container_width=True)
         dosya_sat, uzanti_sat, mime_sat = excel_indir(df_sat[['tarih', 'platform', 'odeme_tipi', 'brut', 'komisyon_tutari', 'stopaj_tutari', 'net', 'tahsilat_tarihi', 'durum']])
@@ -1749,6 +1797,9 @@ elif menu == "Raporlar":
     cir = db_oku(supabase.table("ciro").select("*"))
     if cir: 
         df_cir = pd.DataFrame(cir)
+        for col in ['kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']:
+            if col not in df_cir.columns: df_cir[col] = 0.0 if col != 'kasa' else 'Kasa 1'
+            
         df_cir = df_cir.sort_values(by="tarih", ascending=False)
         st.dataframe(df_cir[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']], hide_index=True, use_container_width=True)
         dosya_cir, uzanti_cir, mime_cir = excel_indir(df_cir[['tarih', 'kasa', 'nakit', 'kredi_karti', 'pavo_nakit', 'pavo_kredi', 'odenmez']])
@@ -1760,6 +1811,9 @@ elif menu == "Raporlar":
     masraflar_r = db_oku(supabase.table("masraf").select("*").order("tarih", desc=True))
     if masraflar_r:
         df_masraf_r = pd.DataFrame(masraflar_r)
+        for col in ['masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']:
+            if col not in df_masraf_r.columns: df_masraf_r[col] = 0.0 if col == 'tutar' else ''
+            
         df_masraf_r['masraf_tipi'] = df_masraf_r.get('masraf_tipi', 'Genel').fillna('Genel Masraf')
         st.dataframe(df_masraf_r[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']], hide_index=True, use_container_width=True)
         dosya_mas, uzanti_mas, mime_mas = excel_indir(df_masraf_r[['tarih', 'masraf_tipi', 'aciklama', 'tutar', 'odeme_tipi']])
