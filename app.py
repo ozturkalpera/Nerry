@@ -12,7 +12,14 @@ url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
 
-# --- EXCEL ÇIKTI FONKSİYONU ---
+# --- YARDIMCI FONKSİYONLAR ---
+def safe_float(val):
+    if pd.isna(val): return 0.0
+    try:
+        return float(str(val).replace(',', '.').replace(' ', '').strip())
+    except ValueError:
+        return 0.0
+
 def excel_indir(df):
     output = io.BytesIO()
     try:
@@ -241,6 +248,7 @@ if not st.session_state.giris_yapildi:
 st.sidebar.title(f"Hoşgeldin, {st.session_state.rol}")
 menu = st.sidebar.radio("Menü", [
     "Günlük Dükkan Cirosu", 
+    "Adisyo (Excel) İçe Aktar",
     "Yemek Sepeti Yönetimi", 
     "Trendyol Yönetimi", 
     "Banka & Kart Yönetimi",
@@ -405,7 +413,135 @@ def platform_sayfasi(platform_adi):
                     st.rerun()
 
 # --- MENÜ İÇERİKLERİ ---
-if menu == "Günlük Dükkan Cirosu":
+if menu == "Adisyo (Excel) İçe Aktar":
+    st.header("📥 Adisyo Excel İçe Aktar (Günlük Satışlar)")
+    bildirim_goster()
+    
+    st.info("Adisyo'dan aldığınız satış raporunu yükleyin. Sistem, 'Geliş Kanalı' ve ödeme yöntemlerini analiz edip Ciro ve Platform kayıtlarınızı otomatik hazırlar. Onayladığınızda hepsi tek seferde sisteme işlenir.")
+    
+    uploaded_file = st.file_uploader("Adisyo Satış Raporu (Excel)", type=["xlsx", "xls"])
+    
+    if uploaded_file is not None:
+        try:
+            df_ad = pd.read_excel(uploaded_file)
+            st.success("Excel başarıyla okundu! Lütfen aşağıdaki sütunları seçin:")
+            cols = ["- Yok -"] + df_ad.columns.tolist()
+            
+            def match_col(keyword):
+                for i, c in enumerate(cols):
+                    if keyword.lower() in str(c).lower(): return i
+                return 0
+                
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: c_kanal = st.selectbox("Geliş Kanalı Sütunu", cols, index=match_col("kanal"))
+            with c2: c_nakit = st.selectbox("Nakit Ödeme Sütunu", cols, index=match_col("nakit"))
+            with c3: c_kk = st.selectbox("Kredi Kartı Sütunu", cols, index=match_col("kredi"))
+            with c4: c_online = st.selectbox("Entegrasyon/Online Sütunu", cols, index=match_col("entegr") or match_col("online"))
+            
+            st.divider()
+            d1, d2 = st.columns(2)
+            with d1: islem_tarihi = st.date_input("İşlem Tarihi (Bu Satışlar Hangi Güne Ait?)", datetime.date.today())
+            with d2: hedef_kasa = st.selectbox("Nakitler Hangi Kasaya Eklensin?", ["Kasa 1", "Kasa 2"])
+            
+            if st.button("Verileri Analiz Et ve Önizleme Oluştur", type="primary"):
+                if c_kanal == "- Yok -":
+                    st.error("Geliş Kanalı sütununu seçmelisiniz!")
+                else:
+                    c_n = 0.0; c_k = 0.0
+                    ys_on = 0.0; ys_kap = 0.0
+                    ty_on = 0.0; ty_kap = 0.0
+                    
+                    for idx, row in df_ad.iterrows():
+                        kanal = str(row[c_kanal]).lower() if c_kanal != "- Yok -" else ""
+                        n_val = safe_float(row[c_nakit]) if c_nakit != "- Yok -" else 0.0
+                        k_val = safe_float(row[c_kk]) if c_kk != "- Yok -" else 0.0
+                        o_val = safe_float(row[c_online]) if c_online != "- Yok -" else 0.0
+                        
+                        if "yemek sepeti" in kanal or "deliveryhero" in kanal:
+                            ys_on += o_val
+                            ys_kap += (n_val + k_val)
+                            c_n += n_val
+                            c_k += k_val
+                        elif "trendyol" in kanal:
+                            ty_on += o_val
+                            ty_kap += (n_val + k_val)
+                            c_n += n_val
+                            c_k += k_val
+                        else:
+                            c_n += n_val
+                            c_k += k_val
+                            
+                    st.session_state['adisyo_ciro'] = [{"Tarih": str(islem_tarihi), "Kasa": hedef_kasa, "Nakit": round(c_n,2), "Kredi Kartı": round(c_k,2), "Pavo Nakit": 0.0, "Pavo Kredi": 0.0, "Ödenmez": 0.0}]
+                    st.session_state['adisyo_ys'] = [{"Tarih": str(islem_tarihi), "Online Ödeme": round(ys_on,2), "Kapıda Ödeme": round(ys_kap,2)}]
+                    st.session_state['adisyo_ty'] = [{"Tarih": str(islem_tarihi), "Online Ödeme": round(ty_on,2), "Kapıda Ödeme": round(ty_kap,2)}]
+                    
+        except Exception as e:
+            st.error(f"Dosya okuma hatası: {e}")
+            
+    if 'adisyo_ciro' in st.session_state:
+        st.divider()
+        st.subheader("📝 İşlem Önizlemesi ve Düzenleme")
+        st.info("Aşağıdaki veriler Excel'den çekildi. Gerekirse kutulara tıklayarak tutarları elle değiştirebilirsiniz. Her şey doğruysa en alttaki butona basarak sisteme aktarın.")
+        
+        st.write("### 🏠 Günlük Dükkan Cirosu (Platform Kapıda Ödemeleri Eklenmiş Hali)")
+        df_ciro_edit = st.data_editor(pd.DataFrame(st.session_state['adisyo_ciro']), hide_index=True, use_container_width=True, key="edit_ciro")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("### 🍔 Yemek Sepeti")
+            df_ys_edit = st.data_editor(pd.DataFrame(st.session_state['adisyo_ys']), hide_index=True, use_container_width=True, key="edit_ys")
+        with c2:
+            st.write("### 🛍️ Trendyol")
+            df_ty_edit = st.data_editor(pd.DataFrame(st.session_state['adisyo_ty']), hide_index=True, use_container_width=True, key="edit_ty")
+            
+        if st.button("✅ Onayla ve Sistemdeki Tüm Kayıtlara Aktar", type="primary"):
+            # 1. CİRO KAYDI
+            c_row = df_ciro_edit.iloc[0]
+            tar_c = str(c_row['Tarih'])
+            if db_oku(supabase.table("ciro").select("id").eq("tarih", tar_c)):
+                st.error("HATA: Bu tarih için Dükkan Cirosu zaten girilmiş! Aktarım iptal edildi.")
+            else:
+                db_yaz(supabase.table("ciro").insert({
+                    "tarih": tar_c, "kasa": c_row['Kasa'], "nakit": float(c_row['Nakit']), "kredi_karti": float(c_row['Kredi Kartı']),
+                    "pavo_nakit": float(c_row['Pavo Nakit']), "pavo_kredi": float(c_row['Pavo Kredi']), "odenmez": float(c_row['Ödenmez'])
+                }))
+                
+                # 2. PLATFORM KAYITLARI
+                def plat_islet(p_adi, r_data):
+                    tar_p = str(r_data['Tarih'])
+                    if db_oku(supabase.table("platform_satis").select("id").eq("platform", p_adi).eq("tarih", tar_p)):
+                        st.warning(f"Uyarı: {p_adi} için bu tarihte zaten kayıt var, bu platform atlandı.")
+                        return
+                        
+                    for o_tip, tutar in [("Online", float(r_data['Online Ödeme'])), ("Kapıda Ödeme", float(r_data['Kapıda Ödeme']))]:
+                        if tutar > 0:
+                            ayarlar = db_oku(supabase.table("ayarlar").select("*").eq("platform", p_adi).eq("odeme_tipi", o_tip))
+                            if ayarlar:
+                                a = ayarlar[0]
+                                k_tut = round(tutar * (float(a['komisyon']) / 100), 2)
+                                s_tut = round((tutar / 1.10) * (float(a['stopaj']) / 100), 2)
+                                kes = round(k_tut + s_tut, 2)
+                                net = round(tutar - kes if o_tip == "Online" else -kes, 2)
+                                t_tar = pd.to_datetime(tar_p).date() + datetime.timedelta(days=int(a['vade']))
+                                
+                                db_yaz(supabase.table("platform_satis").insert({
+                                    "tarih": tar_p, "platform": p_adi, "odeme_tipi": o_tip, 
+                                    "brut": tutar, "komisyon_tutari": k_tut, "stopaj_tutari": s_tut, 
+                                    "kesinti": kes, "net": net, "tahsilat_tarihi": str(t_tar), "durum": "Bekliyor"
+                                }))
+                            else:
+                                st.error(f"{p_adi} {o_tip} için komisyon ayarı bulunamadığından aktarılamadı!")
+
+                plat_islet("Yemek Sepeti", df_ys_edit.iloc[0])
+                plat_islet("Trendyol", df_ty_edit.iloc[0])
+                
+                st.session_state.genel_mesaj = ("success", "Tüm Adisyo verileri başarıyla sisteme entegre edildi!")
+                del st.session_state['adisyo_ciro']
+                del st.session_state['adisyo_ys']
+                del st.session_state['adisyo_ty']
+                st.rerun()
+
+elif menu == "Günlük Dükkan Cirosu":
     st.header("Günlük Dükkan Cirosu")
     bildirim_goster()
     
@@ -585,7 +721,6 @@ elif menu == "Banka & Kart Yönetimi":
             df_bakiye['Bakiye (Eksi İse Borç)'] = df_bakiye['Bakiye (Eksi İse Borç)'].round(2)
             st.dataframe(df_bakiye, hide_index=True, use_container_width=True)
             
-            # --- BAKİYELİ HESAP EKSTRESİ ---
             st.divider()
             st.subheader("🧾 Hesap Ekstresi (Bakiyeli Rapor)")
             if banka_isimleri_tam:
@@ -604,8 +739,6 @@ elif menu == "Banka & Kart Yönetimi":
                     if hesap_hareketleri:
                         df_e = pd.DataFrame(hesap_hareketleri)
                         df_e['tarih_dt'] = pd.to_datetime(df_e['tarih'])
-                        
-                        # İşlemleri kronolojik diziyoruz ki bakiye matematiksel olarak dünden bugüne düzgün aksın.
                         df_e['is_acilis'] = df_e['islem'].apply(lambda x: 0 if x == 'Açılış' else 1)
                         df_e = df_e.sort_values(by=["tarih_dt", "is_acilis", "id"], ascending=[True, True, True]).reset_index(drop=True)
                         
@@ -617,8 +750,6 @@ elif menu == "Banka & Kart Yönetimi":
                         
                         df_e['Bakiye'] = bakiye_list
                         df_e['tarih'] = df_e['tarih_dt'].dt.date
-                        
-                        # Kullanıcının göreceği şekli yeniden eskiye çevir (En güncel bakiye en üstte dursun)
                         df_e = df_e.sort_values(by=["tarih_dt", "is_acilis", "id"], ascending=[False, False, False]).drop(columns=['tarih_dt', 'is_acilis', 'id'])
                         
                         df_e['Giriş'] = df_e['Giriş'].round(2)
@@ -740,10 +871,8 @@ elif menu == "Banka & Kart Yönetimi":
                                 for i, row in df_yuk.iterrows():
                                     t_val = row[col_tar]
                                     ack_val = str(row[col_ack])
-                                    g_tutar = 0.0
-                                    c_tutar = 0.0
-                                    if col_gir != "Yok" and not pd.isna(row[col_gir]): g_tutar = round(float(str(row[col_gir]).replace(',', '.')), 2)
-                                    if col_cik != "Yok" and not pd.isna(row[col_cik]): c_tutar = round(float(str(row[col_cik]).replace(',', '.')), 2)
+                                    g_tutar = safe_float(row[col_gir]) if col_gir != "Yok" else 0.0
+                                    c_tutar = safe_float(row[col_cik]) if col_cik != "Yok" else 0.0
                                     
                                     if g_tutar > 0:
                                         tutar = g_tutar
@@ -1285,11 +1414,6 @@ elif menu == "Kasa Yönetimi (Virman)":
     # --- KASA HAREKETLERİ DÖKÜMÜ ---
     st.divider()
     st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
-    
-    cirolar_all = db_oku(supabase.table("ciro").select("*"))
-    masraflar_all = db_oku(supabase.table("masraf").select("*"))
-    islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
-    cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
     
     kasa_dokum = []
     
