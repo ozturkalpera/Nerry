@@ -428,7 +428,7 @@ def platform_sayfasi(platform_adi):
             st.dataframe(df_odenen[gosterim_odn], hide_index=True, use_container_width=True)
             
             with st.expander("↩️ Tahsilatı Geri Al (Yanlış Aktarımlar İçin)", expanded=False):
-                st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz.")
+                st.info("💡 Yanlışlıkla 'Ödendi' işaretlediğiniz kayıtları tekrar 'Bekliyor' durumuna alabilirsiniz. (Not: Bankaya yansıyan toplu tutarı 'Banka & Kart Yönetimi' sayfasından da silmeyi veya düzeltmeyi unutmayın.)")
                 secenekler_o = {f"{o['tarih']} | {o.get('odeme_tipi','')} | Brüt: {o['brut']} ₺ | Net: {o['net']} ₺ (ID:{o['id']})": o for _, o in df_odenen.iterrows()}
                 sec_o_str = st.selectbox("Geri Alınacak Kaydı Seçin", ["Lütfen seçin..."] + list(secenekler_o.keys()), key=f"{platform_adi}_gerial")
                 if sec_o_str != "Lütfen seçin...":
@@ -1224,6 +1224,10 @@ elif menu == "Cari (Tedarikçi) Yönetimi":
         islemler = db_oku(supabase.table("cari_islemler").select("*"))
         if islemler:
             df_i = pd.DataFrame(islemler)
+            if 'tutar' not in df_i.columns: df_i['tutar'] = 0.0
+            if 'odeme_tipi' not in df_i.columns: df_i['odeme_tipi'] = ""
+            if 'aciklama' not in df_i.columns: df_i['aciklama'] = ""
+            
             df_i['tutar'] = pd.to_numeric(df_i['tutar'], errors='coerce').fillna(0).round(2)
             
             fatura_toplam = df_i[df_i['islem_tipi'] == 'Gelen Fatura (Bize Borç Yazar)'].groupby('cari_adi')['tutar'].sum()
@@ -1401,9 +1405,16 @@ elif menu == "Kasa Yönetimi (Virman)":
                             st.rerun()
 
     cirolar_all = db_oku(supabase.table("ciro").select("*"))
+    if cirolar_all is None: cirolar_all = []
+    
     masraflar_all = db_oku(supabase.table("masraf").select("*"))
+    if masraflar_all is None: masraflar_all = []
+    
     islemler_all = db_oku(supabase.table("kasa_islemleri").select("*"))
+    if islemler_all is None: islemler_all = []
+    
     cari_islemler_all = db_oku(supabase.table("cari_islemler").select("*"))
+    if cari_islemler_all is None: cari_islemler_all = []
 
     def kasa_durumu(k_adi):
         g_c = [c for c in cirolar_all if c['tarih'] < str(secilen) and c.get('kasa') == k_adi]
@@ -1510,75 +1521,167 @@ elif menu == "Kasa Yönetimi (Virman)":
         st.write(f"Bankaya Aktarılan: - {pavo_cikis:,.2f} ₺")
         st.metric("HAVUZDA BEKLEYEN BİRİKİM", f"{pavo_net:,.2f} ₺")
 
-    # --- KASA HAREKETLERİ DÖKÜMÜ ---
+    # --- KASA HAREKETLERİ MENÜSÜ ---
     st.divider()
-    st.subheader("📋 Tüm Kasa Hareketleri ve Dökümü")
+    st.subheader("📋 Kasa ve Havuz Dökümleri")
     
-    kasa_dokum = []
+    kasa_dokum_menu = st.radio(
+        "Döküm Tipi Seçin", 
+        ["🧾 Bakiyeli Hesap Ekstresi", "📋 Tüm Genel Hareketler"], 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
     
-    if cirolar_all:
-        for c in cirolar_all:
-            n_tutar = float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))
-            if n_tutar > 0:
-                kasa_dokum.append({"Tarih": c['tarih'], "Kasa": c.get('kasa'), "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": n_tutar, "Açıklama": "Günlük Nakit Ciro", "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
-                
-    if masraflar_all:
-        for m in masraflar_all:
-            o_tipi = str(m.get('odeme_tipi', ''))
-            if o_tipi.startswith("Nakit - "):
-                k_adi = o_tipi.replace("Nakit - ", "")
-                kasa_dokum.append({"Tarih": m['tarih'], "Kasa": k_adi, "İşlem": "Masraf Çıkışı", "Yön": "Çıkış", "Tutar": float(m.get('tutar',0)), "Açıklama": m.get('aciklama', ''), "created_at": m.get('created_at'), "updated_at": m.get('updated_at')})
-                
-    if cari_islemler_all:
-        for co in cari_islemler_all:
-            o_tipi = str(co.get('odeme_tipi', ''))
-            if o_tipi.startswith("Nakit - "):
-                k_adi = o_tipi.replace("Nakit - ", "")
-                kasa_dokum.append({"Tarih": co['tarih'], "Kasa": k_adi, "İşlem": "Cari Ödemesi", "Yön": "Çıkış", "Tutar": float(co.get('tutar',0)), "Açıklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}", "created_at": co.get('created_at'), "updated_at": co.get('updated_at')})
-                
-    if islemler_all:
-        for i in islemler_all:
-            tip = i.get('islem_tipi', '')
-            tut = float(i.get('tutar', 0))
-            g = i.get('gonderen')
-            a = i.get('alan')
+    if kasa_dokum_menu == "🧾 Bakiyeli Hesap Ekstresi":
+        secili_ekstre = st.selectbox("Ekstresini Görmek İstediğiniz Kasa / Havuz", ["Lütfen seçin...", "Kasa 1", "Kasa 2", "POS Havuzu", "Pavo Havuzu"])
+        
+        if secili_ekstre != "Lütfen seçin...":
+            hesap_hareketleri = []
             
-            if tip in ['Açılış', 'Para Girişi (Sermaye)', 'Bankadan Çekilen']:
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "-", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
-            elif tip == 'Eksik':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "Sayım Eksiği", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
-            elif tip == 'Fazla':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "Sayım Fazlası", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
-            elif tip == 'Bankaya Yatırılan':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "-", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
-            elif tip == 'Virman':
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": "Virman Çıkışı", "Yön": "Çıkış", "Tutar": tut, "Açıklama": f"Alıcı: {a}", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
-                kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": "Virman Girişi", "Yön": "Giriş", "Tutar": tut, "Açıklama": f"Gönderen: {g}", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+            for c in cirolar_all:
+                if secili_ekstre in ["Kasa 1", "Kasa 2"]:
+                    if c.get('kasa') == secili_ekstre:
+                        tut = float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))
+                        if tut > 0:
+                            hesap_hareketleri.append({"id": c['id'], "tarih": c['tarih'], "islem": "Ciro Girişi", "aciklama": "Günlük Nakit Ciro", "Giriş": tut, "Çıkış": 0.0, "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
+                elif secili_ekstre == "POS Havuzu":
+                    tut = float(c.get('kredi_karti', 0))
+                    if tut > 0:
+                        hesap_hareketleri.append({"id": c['id'], "tarih": c['tarih'], "islem": "Ciro Girişi", "aciklama": "Kredi Kartı Cirosu", "Giriş": tut, "Çıkış": 0.0, "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
+                elif secili_ekstre == "Pavo Havuzu":
+                    tut = float(c.get('pavo_kredi', 0))
+                    if tut > 0:
+                        hesap_hareketleri.append({"id": c['id'], "tarih": c['tarih'], "islem": "Ciro Girişi", "aciklama": "Pavo Kredi Cirosu", "Giriş": tut, "Çıkış": 0.0, "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
+
+            if secili_ekstre in ["Kasa 1", "Kasa 2"]:
+                for m in masraflar_all:
+                    if str(m.get('odeme_tipi', '')) == f"Nakit - {secili_ekstre}":
+                        tut = float(m.get('tutar', 0))
+                        if tut > 0:
+                            hesap_hareketleri.append({"id": m['id'], "tarih": m['tarih'], "islem": "Masraf Çıkışı", "aciklama": m.get('aciklama', ''), "Giriş": 0.0, "Çıkış": tut, "created_at": m.get('created_at'), "updated_at": m.get('updated_at')})
+
+            if secili_ekstre in ["Kasa 1", "Kasa 2"]:
+                for co in cari_islemler_all:
+                    if co.get('islem_tipi') == 'Ödeme Yaptık (Borç Düşer)' and str(co.get('odeme_tipi', '')) == f"Nakit - {secili_ekstre}":
+                        tut = float(co.get('tutar', 0))
+                        if tut > 0:
+                            hesap_hareketleri.append({"id": co['id'], "tarih": co['tarih'], "islem": "Cari Ödemesi", "aciklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}", "Giriş": 0.0, "Çıkış": tut, "created_at": co.get('created_at'), "updated_at": co.get('updated_at')})
+
+            for i in islemler_all:
+                tip = i.get('islem_tipi', '')
+                tut = float(i.get('tutar', 0))
+                g = i.get('gonderen')
+                a = i.get('alan')
                 
-    if kasa_dokum:
-        df_kd = pd.DataFrame(kasa_dokum)
-        df_kd['Tarih'] = pd.to_datetime(df_kd['Tarih']).dt.date
-        z_goster_k = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="kasa_zg")
+                if tut > 0:
+                    if tip in ['Açılış', 'Para Girişi (Sermaye)', 'Bankadan Çekilen', 'Fazla'] and a == secili_ekstre:
+                        hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": tip, "aciklama": i.get('aciklama', '-'), "Giriş": tut, "Çıkış": 0.0, "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                    elif tip in ['Eksik', 'Bankaya Yatırılan'] and g == secili_ekstre:
+                        hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": tip, "aciklama": i.get('aciklama', '-'), "Giriş": 0.0, "Çıkış": tut, "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                    elif tip == 'Virman':
+                        if a == secili_ekstre:
+                            hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": "Virman Girişi", "aciklama": f"Gönderen: {g}", "Giriş": tut, "Çıkış": 0.0, "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                        if g == secili_ekstre:
+                            hesap_hareketleri.append({"id": i['id'], "tarih": i['tarih'], "islem": "Virman Çıkışı", "aciklama": f"Alıcı: {a}", "Giriş": 0.0, "Çıkış": tut, "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+
+            if hesap_hareketleri:
+                df_e = pd.DataFrame(hesap_hareketleri)
+                df_e['tarih_dt'] = pd.to_datetime(df_e['tarih'])
+                df_e['is_acilis'] = df_e['islem'].apply(lambda x: 0 if 'Açılış' in x or 'Sermaye' in x else 1)
+                
+                df_e = df_e.sort_values(by=["tarih_dt", "is_acilis", "id"], ascending=[True, True, True]).reset_index(drop=True)
+                
+                bakiye_list = []
+                bakiye = 0.0
+                for idx, r in df_e.iterrows():
+                    bakiye = round(bakiye + r['Giriş'] - r['Çıkış'], 2)
+                    bakiye_list.append(bakiye)
+                
+                df_e['Bakiye'] = bakiye_list
+                df_e['tarih'] = df_e['tarih_dt'].dt.date
+                
+                df_e = df_e.sort_values(by=["tarih_dt", "is_acilis", "id"], ascending=[False, False, False]).drop(columns=['tarih_dt', 'is_acilis', 'id'])
+                
+                df_e['Giriş'] = df_e['Giriş'].round(2)
+                df_e['Çıkış'] = df_e['Çıkış'].round(2)
+                df_e['Bakiye'] = df_e['Bakiye'].round(2)
+
+                z_goster_ke = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="kasa_ekstre_zg")
+                gosterim_ekstre = ['tarih', 'islem', 'aciklama', 'Giriş', 'Çıkış', 'Bakiye']
+                if z_goster_ke: df_e, gosterim_ekstre = zaman_sutunlari_ekle(df_e, gosterim_ekstre)
+                
+                st.dataframe(df_e[gosterim_ekstre], hide_index=True, use_container_width=True)
+                dosya_e, uzanti_e, mime_e = excel_indir(df_e[gosterim_ekstre])
+                st.download_button(f"📥 {secili_ekstre} Ekstresini İndir", data=dosya_e, file_name=f"{secili_ekstre}_Ekstresi.{uzanti_e}", mime=mime_e, key="dl_kasa_ekstre")
+            else:
+                st.info("Bu kasa/havuz için henüz hareket bulunmuyor.")
+
+    elif kasa_dokum_menu == "📋 Tüm Genel Hareketler":
+        kasa_dokum = []
         
-        with st.expander("🔍 Kasa Filtreleme Paneli", expanded=True):
-            f1, f2, f3 = st.columns(3)
-            with f1: tar_aralik_k = st.date_input("Tarih Aralığı", [df_kd['Tarih'].min(), df_kd['Tarih'].max()], key="kd_tar")
-            with f2: sec_kasa_k = st.multiselect("Kasa Seç", df_kd['Kasa'].unique().tolist(), key="kd_kasa")
-            with f3: sec_islem_k = st.multiselect("İşlem Tipi", df_kd['İşlem'].unique().tolist(), key="kd_islem")
+        if cirolar_all:
+            for c in cirolar_all:
+                n_tutar = float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))
+                if n_tutar > 0:
+                    kasa_dokum.append({"Tarih": c['tarih'], "Kasa": c.get('kasa'), "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": n_tutar, "Açıklama": "Günlük Nakit Ciro", "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
+                    
+        if masraflar_all:
+            for m in masraflar_all:
+                o_tipi = str(m.get('odeme_tipi', ''))
+                if o_tipi.startswith("Nakit - "):
+                    k_adi = o_tipi.replace("Nakit - ", "")
+                    kasa_dokum.append({"Tarih": m['tarih'], "Kasa": k_adi, "İşlem": "Masraf Çıkışı", "Yön": "Çıkış", "Tutar": float(m.get('tutar',0)), "Açıklama": m.get('aciklama', ''), "created_at": m.get('created_at'), "updated_at": m.get('updated_at')})
+                    
+        if cari_islemler_all:
+            for co in cari_islemler_all:
+                o_tipi = str(co.get('odeme_tipi', ''))
+                if o_tipi.startswith("Nakit - "):
+                    k_adi = o_tipi.replace("Nakit - ", "")
+                    kasa_dokum.append({"Tarih": co['tarih'], "Kasa": k_adi, "İşlem": "Cari Ödemesi", "Yön": "Çıkış", "Tutar": float(co.get('tutar',0)), "Açıklama": f"Firma: {co.get('cari_adi', '')} - {co.get('aciklama', '')}", "created_at": co.get('created_at'), "updated_at": co.get('updated_at')})
+                    
+        if islemler_all:
+            for i in islemler_all:
+                tip = i.get('islem_tipi', '')
+                tut = float(i.get('tutar', 0))
+                g = i.get('gonderen')
+                a = i.get('alan')
+                
+                if tip in ['Açılış', 'Para Girişi (Sermaye)', 'Bankadan Çekilen']:
+                    kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "-", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                elif tip == 'Eksik':
+                    kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "Sayım Eksiği", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                elif tip == 'Fazla':
+                    kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": tip, "Yön": "Giriş", "Tutar": tut, "Açıklama": "Sayım Fazlası", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                elif tip == 'Bankaya Yatırılan':
+                    kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": tip, "Yön": "Çıkış", "Tutar": tut, "Açıklama": "-", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                elif tip == 'Virman':
+                    kasa_dokum.append({"Tarih": i['tarih'], "Kasa": g, "İşlem": "Virman Çıkışı", "Yön": "Çıkış", "Tutar": tut, "Açıklama": f"Alıcı: {a}", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                    kasa_dokum.append({"Tarih": i['tarih'], "Kasa": a, "İşlem": "Virman Girişi", "Yön": "Giriş", "Tutar": tut, "Açıklama": f"Gönderen: {g}", "created_at": i.get('created_at'), "updated_at": i.get('updated_at')})
+                    
+        if kasa_dokum:
+            df_kd = pd.DataFrame(kasa_dokum)
+            df_kd['Tarih'] = pd.to_datetime(df_kd['Tarih']).dt.date
+            z_goster_k = st.toggle("⏱️ Kayıt (İşlenme) Zamanlarını Göster", key="kasa_zg")
             
-        if len(tar_aralik_k) == 2: df_kd = df_kd[(df_kd['Tarih'] >= tar_aralik_k[0]) & (df_kd['Tarih'] <= tar_aralik_k[1])]
-        elif len(tar_aralik_k) == 1: df_kd = df_kd[df_kd['Tarih'] == tar_aralik_k[0]]
-        if sec_kasa_k: df_kd = df_kd[df_kd['Kasa'].isin(sec_kasa_k)]
-        if sec_islem_k: df_kd = df_kd[df_kd['İşlem'].isin(sec_islem_k)]
-        
-        gosterim_kasa = ['Tarih', 'Kasa', 'İşlem', 'Yön', 'Tutar', 'Açıklama']
-        if z_goster_k: df_kd, gosterim_kasa = zaman_sutunlari_ekle(df_kd, gosterim_kasa)
-        
-        st.dataframe(df_kd[gosterim_kasa].sort_values("Tarih", ascending=False), hide_index=True, use_container_width=True)
-        dosya_kd, uz_kd, mi_kd = excel_indir(df_kd[gosterim_kasa])
-        st.download_button("📥 Kasa Dökümünü Excel'e İndir", data=dosya_kd, file_name=f"Kasa_Hareketleri.{uz_kd}", mime=mi_kd, key="dl_kasa")
-    else:
-        st.info("Kayıtlı kasa hareketi bulunmuyor.")
+            with st.expander("🔍 Kasa Filtreleme Paneli", expanded=True):
+                f1, f2, f3 = st.columns(3)
+                with f1: tar_aralik_k = st.date_input("Tarih Aralığı", [df_kd['Tarih'].min(), df_kd['Tarih'].max()], key="kd_tar")
+                with f2: sec_kasa_k = st.multiselect("Kasa Seç", df_kd['Kasa'].unique().tolist(), key="kd_kasa")
+                with f3: sec_islem_k = st.multiselect("İşlem Tipi", df_kd['İşlem'].unique().tolist(), key="kd_islem")
+                
+            if len(tar_aralik_k) == 2: df_kd = df_kd[(df_kd['Tarih'] >= tar_aralik_k[0]) & (df_kd['Tarih'] <= tar_aralik_k[1])]
+            elif len(tar_aralik_k) == 1: df_kd = df_kd[df_kd['Tarih'] == tar_aralik_k[0]]
+            if sec_kasa_k: df_kd = df_kd[df_kd['Kasa'].isin(sec_kasa_k)]
+            if sec_islem_k: df_kd = df_kd[df_kd['İşlem'].isin(sec_islem_k)]
+            
+            gosterim_kasa = ['Tarih', 'Kasa', 'İşlem', 'Yön', 'Tutar', 'Açıklama']
+            if z_goster_k: df_kd, gosterim_kasa = zaman_sutunlari_ekle(df_kd, gosterim_kasa)
+            
+            st.dataframe(df_kd[gosterim_kasa].sort_values("Tarih", ascending=False), hide_index=True, use_container_width=True)
+            dosya_kd, uz_kd, mi_kd = excel_indir(df_kd[gosterim_kasa])
+            st.download_button("📥 Kasa Dökümünü Excel'e İndir", data=dosya_kd, file_name=f"Kasa_Hareketleri.{uz_kd}", mime=mi_kd, key="dl_kasa")
+        else:
+            st.info("Kayıtlı kasa hareketi bulunmuyor.")
 
 elif menu == "Personel & Puantaj":
     st.header("👥 Personel, İzin ve Maaş Yönetimi")
