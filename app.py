@@ -29,23 +29,25 @@ def excel_indir(df):
     except ModuleNotFoundError:
         return df.to_csv(index=False).encode('utf-8-sig'), "csv", "text/csv"
 
-# --- ZAMAN DAMGASI (CREATED_AT) FONKSİYONU ---
-def formatla_zaman(col):
-    dt_col = pd.to_datetime(col, errors='coerce')
+# --- ZAMAN DAMGASI (GELİŞTİRİLMİŞ PARSER) ---
+def format_single_date(d):
+    if pd.isna(d) or str(d).strip() in ["", "NaT", "nan", "None"]: 
+        return "-"
     try:
-        return dt_col.dt.tz_convert('Europe/Istanbul').dt.strftime('%d.%m.%Y %H:%M').fillna('-')
-    except TypeError:
-        return dt_col.dt.strftime('%d.%m.%Y %H:%M').fillna('-')
+        dt = pd.to_datetime(d)
+        if dt.tzinfo is None:
+            dt = dt.tz_localize('UTC')
+        return dt.tz_convert('Europe/Istanbul').strftime('%d.%m.%Y %H:%M')
     except Exception:
-        return col
+        return "-"
 
 def zaman_sutunlari_ekle(df, mevcut_sutunlar):
     ek_sutunlar = mevcut_sutunlar.copy()
     if 'created_at' in df.columns:
-        df['İşlenme Zamanı'] = formatla_zaman(df['created_at'])
+        df['İşlenme Zamanı'] = df['created_at'].apply(format_single_date)
         ek_sutunlar.append('İşlenme Zamanı')
     if 'updated_at' in df.columns:
-        df['Düzenleme Zamanı'] = formatla_zaman(df['updated_at'])
+        df['Düzenleme Zamanı'] = df['updated_at'].apply(format_single_date)
         ek_sutunlar.append('Düzenleme Zamanı')
     return df, ek_sutunlar
 
@@ -516,15 +518,17 @@ if menu == "Adisyo (Excel) İçe Aktar":
                         ys_on += ys_o_val
                         ty_on += ty_o_val
                         
+                        # Testten geçen kural: Tümü her halükarda ciroyu günceller (Sanal Havuz / Kasa ayrımı için)
                         c_n += n_val
                         c_k += k_val
                         c_pn += pn_val
                         c_pk += pk_val
                         
-                        if "yemek sepeti" in kanal or "deliveryhero" in kanal or "ys" in kanal:
-                            ys_kap += (n_val + k_val)
-                        elif "trendyol" in kanal or "ty" in kanal:
-                            ty_kap += (n_val + k_val)
+                        # TDD Düzeltmesi: Eğer sipariş platform ise, ödeme Pavo da olsa Nakit de olsa Kapıda Ödemedir!
+                        if "yemek" in kanal or "delivery" in kanal or "ys" in kanal:
+                            ys_kap += (n_val + k_val + pn_val + pk_val)
+                        elif "trendyol" in kanal or "ty" in kanal or "go" in kanal:
+                            ty_kap += (n_val + k_val + pn_val + pk_val)
                             
                     st.session_state['adisyo_ciro'] = [{"Tarih": str(islem_tarihi), "Kasa": hedef_kasa, "Nakit": round(c_n,2), "Kredi Kartı": round(c_k,2), "Pavo Nakit": round(c_pn,2), "Pavo Kredi": round(c_pk,2), "Ödenmez": 0.0}]
                     st.session_state['adisyo_ys'] = [{"Tarih": str(islem_tarihi), "Online Ödeme": round(ys_on,2), "Kapıda Ödeme": round(ys_kap,2)}]
@@ -1621,9 +1625,20 @@ elif menu == "Kasa Yönetimi (Virman)":
         
         if cirolar_all:
             for c in cirolar_all:
+                # Nakit Kasası
                 n_tutar = float(c.get('nakit', 0)) + float(c.get('pavo_nakit', 0))
                 if n_tutar > 0:
                     kasa_dokum.append({"Tarih": c['tarih'], "Kasa": c.get('kasa'), "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": n_tutar, "Açıklama": "Günlük Nakit Ciro", "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
+                
+                # POS Havuzu 
+                kk_tutar = float(c.get('kredi_karti', 0))
+                if kk_tutar > 0:
+                    kasa_dokum.append({"Tarih": c['tarih'], "Kasa": "POS Havuzu", "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": kk_tutar, "Açıklama": "Kredi Kartı Cirosu", "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
+                    
+                # Pavo Havuzu 
+                pk_tutar = float(c.get('pavo_kredi', 0))
+                if pk_tutar > 0:
+                    kasa_dokum.append({"Tarih": c['tarih'], "Kasa": "Pavo Havuzu", "İşlem": "Ciro Girişi", "Yön": "Giriş", "Tutar": pk_tutar, "Açıklama": "Pavo Kredi Cirosu", "created_at": c.get('created_at'), "updated_at": c.get('updated_at')})
                     
         if masraflar_all:
             for m in masraflar_all:
