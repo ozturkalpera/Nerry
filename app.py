@@ -124,7 +124,7 @@ def platform_kaydet_cb(plat_adi):
         st.session_state["genel_mesaj"] = ("warning", "Lütfen en az bir tutar girin.")
         return
 
-   mevcut = db_oku(supabase.table("platform_satis").select("id").eq("platform", plat_adi).eq("tarih", str(tarih)))
+    mevcut = db_oku(supabase.table("platform_satis").select("id").eq("platform", plat_adi).eq("tarih", str(tarih)))
     if mevcut:
         st.session_state["genel_mesaj"] = ("error", f"⚠️ {tarih} tarihi için {plat_adi} satışı zaten girilmiş! Değiştirmek için Düzenle panelini kullanın.")
         return
