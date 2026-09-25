@@ -553,10 +553,12 @@ if menu == "Adisyo (Excel) İçe Aktar":
                         c_pn += pn_val
                         c_pk += pk_val
                         
-                        if "yemek" in kanal or "delivery" in kanal or "ys" in kanal:
-                            ys_kap += (n_val + k_val + pn_val + pk_val)
-                        elif "trendyol" in kanal or "ty" in kanal or "go" in kanal or "getir" in kanal:
+                       # Önce "trendyol" kelimesini kontrol eden if bloğunu öne alıyoruz ki "Trendyol Yemek" buraya düşsün
+                        if "trendyol" in kanal or "ty" in kanal or "go" in kanal or "getir" in kanal:
                             ty_kap += (n_val + k_val + pn_val + pk_val)
+                        # Sonra Yemek Sepeti'ni kontrol ediyoruz
+                        elif "yemek" in kanal or "delivery" in kanal or "ys" in kanal:
+                            ys_kap += (n_val + k_val + pn_val + pk_val)
                        
                             
                     st.session_state['adisyo_ciro'] = [{"Tarih": str(islem_tarihi), "Kasa": hedef_kasa, "Nakit": round(c_n,2), "Kredi Kartı": round(c_k,2), "Pavo Nakit": round(c_pn,2), "Pavo Kredi": round(c_pk,2), "Ödenmez": 0.0}]
