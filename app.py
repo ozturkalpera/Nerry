@@ -124,14 +124,15 @@ def platform_kaydet_cb(plat_adi):
         st.session_state["genel_mesaj"] = ("warning", "Lütfen en az bir tutar girin.")
         return
 
-    mevcut = db_oku(supabase.table("platform_satis").select("id").eq("platform", plat_adi).eq("tarih", str(tarih)))
-    if mevcut:
-        st.session_state["genel_mesaj"] = ("error", f"⚠️ {tarih} tarihi için {plat_adi} satışı zaten girilmiş! Değiştirmek için Düzenle panelini kullanın.")
-        return
-
     hata = False
     for o_tip, tutar in [("Online", online), ("Kapıda Ödeme", kapida)]:
         if tutar > 0:
+            mevcut = db_oku(supabase.table("platform_satis").select("id").eq("platform", plat_adi).eq("tarih", str(tarih)).eq("odeme_tipi", o_tip))
+            if mevcut:
+                st.session_state["genel_mesaj"] = ("error", f"⚠️ {tarih} tarihi için {plat_adi} - {o_tip} satışı zaten girilmiş! Değiştirmek için Düzenle panelini kullanın.")
+                hata = True
+                continue
+
             ayar_getir = db_oku(supabase.table("ayarlar").select("*").eq("platform", plat_adi).eq("odeme_tipi", o_tip))
             if len(ayar_getir) > 0:
                 ayar = ayar_getir[0]
@@ -150,7 +151,8 @@ def platform_kaydet_cb(plat_adi):
                     hata = True
             else:
                 st.session_state["genel_mesaj"] = ("error", f"⚠️ Lütfen önce Ayarlar'dan '{o_tip}' için oranları kaydedin!")
-                return
+                hata = True
+                continue
     if not hata:
         st.session_state["genel_mesaj"] = ("success", f"{plat_adi} satışları başarıyla kaydedildi!")
         st.session_state[f"{plat_adi}_on"] = 0.0
@@ -593,12 +595,13 @@ if menu == "Adisyo (Excel) İçe Aktar":
                 
                 def plat_islet(p_adi, r_data):
                     tar_p = str(r_data['Tarih'])
-                    if db_oku(supabase.table("platform_satis").select("id").eq("platform", p_adi).eq("tarih", tar_p)):
-                        st.warning(f"Uyarı: {p_adi} için {tar_p} tarihinde zaten satış kaydı var, bu platform atlandı.")
-                        return
                         
                     for o_tip, tutar in [("Online", safe_float(r_data['Online Ödeme'])), ("Kapıda Ödeme", safe_float(r_data['Kapıda Ödeme']))]:
                         if tutar > 0:
+                            if db_oku(supabase.table("platform_satis").select("id").eq("platform", p_adi).eq("tarih", tar_p).eq("odeme_tipi", o_tip)):
+                                st.warning(f"Uyarı: {p_adi} için {tar_p} tarihinde {o_tip} satışı zaten var, bu işlem atlandı.")
+                                continue
+                                
                             ayarlar = db_oku(supabase.table("ayarlar").select("*").eq("platform", p_adi).eq("odeme_tipi", o_tip))
                             if ayarlar:
                                 a = ayarlar[0]
@@ -787,8 +790,17 @@ elif menu == "Banka & Kart Yönetimi":
                                     st.rerun()
                             with cs:
                                 if st.form_submit_button("Sil"):
+                                    # Bağlı işlemleri bul ve temizle
+                                    if sec_bi.get('islem_tipi') == "Para Çıkışı (Masraf)":
+                                        asit_aciklama = sec_bi.get('aciklama', '').replace('Masraf: ', '')
+                                        db_yaz(supabase.table("masraf").delete().eq("odeme_tipi", sec_bi['hesap_adi']).eq("tarih", str(sec_bi['tarih'])).ilike("aciklama", f"{asit_aciklama}%"))
+                                    elif sec_bi.get('islem_tipi') == "Para Çıkışı" and "Cari Ödemesi:" in sec_bi.get('aciklama', ''):
+                                        asit_aciklama = sec_bi.get('aciklama', '').replace('Cari Ödemesi: ', '')
+                                        db_yaz(supabase.table("cari_islemler").delete().eq("odeme_tipi", sec_bi['hesap_adi']).eq("tarih", str(sec_bi['tarih'])).ilike("aciklama", f"{asit_aciklama}%"))
+
+                                    # Ana banka kaydını sil
                                     if db_yaz(supabase.table("banka_islemleri").delete().eq("id", sec_bi['id'])):
-                                        st.session_state.genel_mesaj = ("info", "Banka işlemi silindi!")
+                                        st.session_state.genel_mesaj = ("info", "Banka işlemi ve varsa bağlantılı kayıtlar silindi!")
                                     st.rerun()
 
     elif alt_menu == "📊 Bakiyeler ve Hesap Ekstresi":
