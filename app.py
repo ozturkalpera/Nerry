@@ -555,8 +555,9 @@ if menu == "Adisyo (Excel) İçe Aktar":
                         
                         if "yemek" in kanal or "delivery" in kanal or "ys" in kanal:
                             ys_kap += (n_val + k_val + pn_val + pk_val)
-                        elif "trendyol" in kanal or "ty" in kanal or "go" in kanal:
+                        elif "trendyol" in kanal or "ty" in kanal or "go" in kanal or "getir" in kanal:
                             ty_kap += (n_val + k_val + pn_val + pk_val)
+                       
                             
                     st.session_state['adisyo_ciro'] = [{"Tarih": str(islem_tarihi), "Kasa": hedef_kasa, "Nakit": round(c_n,2), "Kredi Kartı": round(c_k,2), "Pavo Nakit": round(c_pn,2), "Pavo Kredi": round(c_pk,2), "Ödenmez": 0.0}]
                     st.session_state['adisyo_ys'] = [{"Tarih": str(islem_tarihi), "Online Ödeme": round(ys_on,2), "Kapıda Ödeme": round(ys_kap,2)}]
